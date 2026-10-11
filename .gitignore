@@ -2,3 +2,8 @@ Data/
 mri-config.json
 *.log
 *.zip
+
+# Timestamped validation run output; the committed validation/100-run/ sample is kept.
+/validation/*
+!/validation/100-run/
+!/validation/100-run/**
