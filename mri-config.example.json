@@ -1,0 +1,19 @@
+{
+  "SchemaVersion": 1,
+  "SourcePath": "",
+  "SetupBatch": "mri.bat",
+  "SetupArguments": [],
+  "SetupInteractive": false,
+  "SetupTimeoutSeconds": 900,
+  "CopyTimeoutSeconds": 3600,
+  "PrepareDisk": false,
+  "FileSystem": "FAT32",
+  "RequiredFiles": [],
+  "MutableFiles": [],
+  "MaxParallel": 2,
+  "PollSeconds": 2,
+  "StablePolls": 3,
+  "MinimumDiskBytes": 4000000000,
+  "MaximumDiskBytes": 64000000000,
+  "SerializeSetup": true
+}
