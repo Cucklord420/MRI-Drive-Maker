@@ -1,0 +1,930 @@
+{
+  "source_commit": "7c19c3a5da3f6f81bccdf3044f690e35bfbc60d7",
+  "source_sha256": {
+    "MRI-Batch.ps1": "fb200cff043f4b755bd8d4cdcb126a40354e874d74c373a4e593182321ede228",
+    "MRI.Batch.psm1": "77350f9f5ccd9aaf0305b88166806264ba0ad24f108a32c7e10b90e314b20891",
+    "NativeProcess.cs": "0bb71c440aa637f90743f49a86aa1ee182e1f2f36303892a0d8253f905fb154a",
+    "Start-MRI-Batch.cmd": "c14a0a17cfd5b8c1d6938e3fe208fed1cb6fb7541f4a486477389667b45a0eae",
+    "MRI_CreatorV3.ps1": "ad66d87717ca75cc1560694aa76709289496cc8bdec7ff83e6a78ebdd523011d",
+    "MRI_CreatorV4.ps1": "ad66d87717ca75cc1560694aa76709289496cc8bdec7ff83e6a78ebdd523011d",
+    "tests/SelfTest.ps1": "e22666e80198a07c86c5acbbb1e41604ae9102f80e9d1a1c2c3e84a110e2b251",
+    "tests/WindowsProcessSmoke.ps1": "b2db8a32ee8c7a30aa6edef84c0995998693a10ecc12d90e3bdfaa4bfa05ceb3"
+  },
+  "power_shell_version": "7.6.6",
+  "platform": "Linux",
+  "completed_runs": 100,
+  "passed_runs": 100,
+  "passed_cases": 4800,
+  "failed_cases": 0,
+  "runs": [
+    {
+      "run": 1,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.969,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 2,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.45,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 3,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.512,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 4,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.837,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 5,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.833,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 6,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.739,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 7,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.635,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 8,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.472,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 9,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.623,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 10,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 3.014,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 11,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.787,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 12,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.909,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 13,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.814,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 14,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.687,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 15,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.764,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 16,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.71,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 17,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.621,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 18,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.84,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 19,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.484,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 20,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.828,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 21,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.651,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 22,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.882,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 23,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.855,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 24,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.821,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 25,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 3.051,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 26,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.956,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 27,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.767,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 28,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.572,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 29,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.571,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 30,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 3.154,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 31,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 3.176,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 32,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 4.333,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 33,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 3.564,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 34,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 3.551,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 35,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.983,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 36,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 3.346,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 37,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 3.845,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 38,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 3.534,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 39,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 3.383,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 40,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 3.878,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 41,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.775,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 42,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.949,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 43,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 3.093,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 44,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 3.085,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 45,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 3.702,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 46,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 7.227,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 47,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 3.933,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 48,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.967,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 49,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 3.563,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 50,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.881,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 51,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 3.008,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 52,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.734,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 53,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.841,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 54,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.881,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 55,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 3.135,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 56,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.676,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 57,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 3.03,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 58,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.673,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 59,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.66,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 60,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.597,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 61,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.525,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 62,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.789,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 63,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.947,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 64,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 3.003,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 65,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 3.018,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 66,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 3.066,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 67,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.727,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 68,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.936,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 69,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.871,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 70,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.535,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 71,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.682,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 72,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.599,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 73,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.858,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 74,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.713,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 75,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.827,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 76,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.679,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 77,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.724,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 78,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 3.402,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 79,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.604,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 80,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.64,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 81,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.525,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 82,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.605,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 83,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.498,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 84,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.894,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 85,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.587,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 86,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.6,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 87,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.806,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 88,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.589,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 89,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.654,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 90,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.484,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 91,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.543,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 92,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.686,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 93,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.641,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 94,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.589,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 95,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.484,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 96,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.87,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 97,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.747,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 98,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 2.953,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 99,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 3.365,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    },
+    {
+      "run": 100,
+      "passed": true,
+      "exit_code": 0,
+      "passed_cases": 48,
+      "failed_cases": 0,
+      "elapsed_seconds": 3.3,
+      "log_sha256": "7faf9fdb1e713d1841cfde02844296b19641a88f14c81612350632ba1ab1e187"
+    }
+  ],
+  "limitations": [
+    "Windows storage APIs, native process execution and volume flush were mocked.",
+    "No physical USB, actual MRI batch, formatting or boot test was performed."
+  ],
+  "elapsed_seconds": 293.497,
+  "date": "10-10-2026",
+  "time_zone": "America/New_York",
+  "started_time": "09:00:12 PM",
+  "finished_time": "09:05:06 PM"
+}

@@ -1,6 +1,12 @@
-MRI Batch Creator validation — 10-10-2026
+MRI Drive Maker validation — 10-10-2026
+100/100 simulated runs passed; 48 tests per run; 4,800/4,800 test cases passed.
 Host: PowerShell 7.6.6 on Linux
+Source revision: 7c19c3a5da3f6f81bccdf3044f690e35bfbc60d7
+Elapsed time: 293.497 seconds
+Per-run logs and tested source hashes: validation/100-run/results.json
 Windows native execution, storage operations, physical USBs and MRI payload were not tested here.
+
+Representative run 100:
 
 PASS PowerShell files parse without errors
 PASS C# interop source compiles
@@ -43,3 +49,12 @@ PASS Preparation runs only for a specifically registered empty drive
 PASS Successful unchanged drive is verified and skipped on reinsertion
 PASS Added client file invalidates a previous ready receipt
 PASS Corrupted previous output cannot be erased or trusted
+PASS Recipe changes require fresh media in copy-only mode
+PASS FAT32 oversized source file is rejected before copy
+PASS Insufficient free space fails before writing
+PASS An emptied drive cannot reuse a stale ready receipt
+PASS Failed refresh invalidates the old ready receipt before changing media
+PASS Unexpected copied paths prevent setup
+PASS Removal of a source USB prevents a build
+
+48/48 tests passed. All storage/process APIs in build tests were simulated.

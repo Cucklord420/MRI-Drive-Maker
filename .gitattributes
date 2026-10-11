@@ -6,3 +6,4 @@
 *.cmd text eol=crlf
 legacy/*.txt -text -diff
 *.bundle -text -diff
+*.zip -text -diff

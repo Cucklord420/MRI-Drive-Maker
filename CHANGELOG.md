@@ -10,3 +10,4 @@ Independent update based on JStone21/MRI-Creation; the upstream repository was n
 - Retired the unsafe legacy entry points; retained original files as non-executable provenance and preserved the GPL license.
 - Added 48 simulated safety/orchestration tests, a nondestructive Windows process smoke test, and usage/limitations documentation. Windows storage, process execution, actual MRI media creation, and boot behavior remain unverified here.
 - Added explicit GPL-3.0-only source headers, attribution and dated modification notices, visible menu license information, and a complete source download.
+- Completed the full 48-test simulated suite 100 consecutive times: 4,800 passed, zero failures; added all run logs and tested source hashes.
