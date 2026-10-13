@@ -1,0 +1,46 @@
+{
+  "date": "10-13-2026",
+  "source_commit": "e0669434938592a15e5d63ee36763121bd92ae85",
+  "windows": {
+    "RunId": 38463830505,
+    "Url": "https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38463830505",
+    "SourceCommit": "e0669434938592a15e5d63ee36763121bd92ae85",
+    "Conclusion": "success",
+    "WindowsHost": "Windows Server 2025",
+    "PowerShellVersion": "5.1.26100.33438",
+    "MenuInput": "Mocked to Q in an isolated temporary copy",
+    "StartupChecks": 8,
+    "SimulatedSuiteCases": 48,
+    "NativeProcessChecks": 2
+  },
+  "linux": {
+    "PowerShellVersion": "7.6.6",
+    "StartupChecks": 7,
+    "Failed": 0,
+    "SimulatedSuiteCases": 48
+  },
+  "source_sha256": {
+    "MRI-Batch.ps1": "5f78de0e1c745485e71090ed6dc9b5a36f068a83b3607a3c7bcba6c405279da1",
+    "MRI.Batch.psm1": "77350f9f5ccd9aaf0305b88166806264ba0ad24f108a32c7e10b90e314b20891",
+    "NativeProcess.cs": "0bb71c440aa637f90743f49a86aa1ee182e1f2f36303892a0d8253f905fb154a",
+    "Start-MRI-Batch.cmd": "c14a0a17cfd5b8c1d6938e3fe208fed1cb6fb7541f4a486477389667b45a0eae",
+    "MRI_CreatorV3.ps1": "ad66d87717ca75cc1560694aa76709289496cc8bdec7ff83e6a78ebdd523011d",
+    "MRI_CreatorV4.ps1": "ad66d87717ca75cc1560694aa76709289496cc8bdec7ff83e6a78ebdd523011d",
+    "tests/StartupSmoke.ps1": "148e9e55101ff474731733402a780f51d941dc39c03fb170c7b31d066c83bd65",
+    "tests/SelfTest.ps1": "e22666e80198a07c86c5acbbb1e41604ae9102f80e9d1a1c2c3e84a110e2b251",
+    "tests/Invoke-ValidationRuns.ps1": "28a2807695c352de8a7587666708460187ed972cc1682ccdb91affe55c6a492d",
+    "tests/WindowsProcessSmoke.ps1": "b2db8a32ee8c7a30aa6edef84c0995998693a10ecc12d90e3bdfaa4bfa05ceb3"
+  },
+  "evidence_sha256": {
+    "linux.json": "e78799b1b00df524a2389d97d97bbb4065c605471626f560c27df3a9da9809b8",
+    "linux.txt": "c400903f83f6bc7c56ba2d4104d80e3b780c2b85b07b8302b105efbbf4dcea7c",
+    "windows.json": "c94f2b3b03e1baf9a3d4431d1def5d183571460340d1c9ec14e6387d0c4708f3",
+    "windows.txt": "0f8331b31eaba3d667a25f0406af70cb507ffb1201fd626804cdde35e6542610"
+  },
+  "limitations": [
+    "Menu input is mocked in the isolated temporary test copy.",
+    "Build-suite storage and volume APIs are simulated.",
+    "Native process completion and cancellation were exercised on Windows Server 2025.",
+    "Physical USB operations, Windows 10/11 workstations, the actual MRI batch, and bootability were not tested."
+  ]
+}

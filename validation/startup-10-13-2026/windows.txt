@@ -1,0 +1,76 @@
+PASS Direct -File launch with default configuration from another folder
+PASS Direct -File launch accepts an explicit configuration path
+PASS Direct -File launch accepts an empty configuration path
+PASS Legacy MRI_CreatorV3.ps1 launches the current menu
+PASS Legacy MRI_CreatorV4.ps1 launches the current menu
+  48/48 tests passed.
+PASS Main entry point runs the full simulated suite via -File -Action SelfTest
+PASS Validation runner resolves omitted paths after -File parameter binding
+PASS Start-MRI-Batch.cmd launches Windows PowerShell 5.1 from a folder with spaces and ampersand
+
+8/8 startup tests passed.
+{
+    "Date":  "10-13-2026",
+    "PowerShellVersion":  "5.1.26100.33438",
+    "Platform":  "Win32NT",
+    "Passed":  8,
+    "Failed":  0,
+    "Tests":  [
+                  {
+                      "Name":  "Direct -File launch with default configuration from another folder",
+                      "Passed":  true,
+                      "Error":  "",
+                      "ElapsedSeconds":  0.516
+                  },
+                  {
+                      "Name":  "Direct -File launch accepts an explicit configuration path",
+                      "Passed":  true,
+                      "Error":  "",
+                      "ElapsedSeconds":  0.396
+                  },
+                  {
+                      "Name":  "Direct -File launch accepts an empty configuration path",
+                      "Passed":  true,
+                      "Error":  "",
+                      "ElapsedSeconds":  0.377
+                  },
+                  {
+                      "Name":  "Legacy MRI_CreatorV3.ps1 launches the current menu",
+                      "Passed":  true,
+                      "Error":  "",
+                      "ElapsedSeconds":  0.409
+                  },
+                  {
+                      "Name":  "Legacy MRI_CreatorV4.ps1 launches the current menu",
+                      "Passed":  true,
+                      "Error":  "",
+                      "ElapsedSeconds":  0.385
+                  },
+                  {
+                      "Name":  "Main entry point runs the full simulated suite via -File -Action SelfTest",
+                      "Passed":  true,
+                      "Error":  "",
+                      "ElapsedSeconds":  3.666
+                  },
+                  {
+                      "Name":  "Validation runner resolves omitted paths after -File parameter binding",
+                      "Passed":  true,
+                      "Error":  "",
+                      "ElapsedSeconds":  3.327
+                  },
+                  {
+                      "Name":  "Start-MRI-Batch.cmd launches Windows PowerShell 5.1 from a folder with spaces and ampersand",
+                      "Passed":  true,
+                      "Error":  "",
+                      "ElapsedSeconds":  0.406
+                  }
+              ],
+    "Scope":  "Real entry points with menu input mocked in the temporary copy, mocked build suite, validation runner; no USB or MRI payload access."
+}
+##[group]Run & ./tests/WindowsProcessSmoke.ps1
+[36;1m& ./tests/WindowsProcessSmoke.ps1[0m
+[36;1mif (-not $?) { exit 1 }[0m
+shell: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.EXE -command ". '{0}'"
+##[endgroup]
+PASS: parent exit did not cause premature completion; its child finished first.
+PASS: cancellation terminated the remaining child process.

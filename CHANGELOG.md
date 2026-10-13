@@ -6,6 +6,7 @@
 - Fixed the same startup defect in `tests/Invoke-ValidationRuns.ps1` and its assignment to the read-only `$PSEdition` variable, while preserving explicit path arguments.
 - Added a nondestructive startup smoke test covering the menu, legacy entry points, explicit/empty config paths, the main self-test entry point, the validation runner, and the Windows `.cmd` launcher from another working directory and a path with spaces and an ampersand.
 - Added Windows PowerShell 5.1 CI for startup, simulated build safety, and native process completion/cancellation. Physical USBs and the proprietary MRI batch remain outside these checks.
+- Verified 8/8 startup checks, 48/48 simulated build cases, and both native process checks on Windows PowerShell 5.1 CI; seven applicable startup checks also passed on PowerShell 7.6.6/Linux. Evidence is in `validation/startup-10-13-2026/`.
 
 ## 10-10-2026
 

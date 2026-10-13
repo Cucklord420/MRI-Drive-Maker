@@ -1,4 +1,14 @@
-MRI Drive Maker validation — 10-10-2026
+MRI Drive Maker v0.1.1 startup validation — 10-13-2026
+Windows PowerShell 5.1.26100.33438 on Windows Server 2025 CI:
+8/8 startup checks, 48/48 simulated build cases, 2/2 native process checks passed.
+PowerShell 7.6.6 on Linux: 7/7 applicable startup checks and the simulated suite passed.
+Windows-tested source revision: e0669434938592a15e5d63ee36763121bd92ae85
+CI: https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38463830505
+Evidence: validation/startup-10-13-2026/results.json
+Menu input was mocked to Q only in the isolated temporary copy.
+Physical USBs, Windows 10/11 workstations, formatting, MRI payload and bootability were not tested.
+
+Historical MRI Drive Maker validation — 10-10-2026
 100/100 simulated runs passed; 48 tests per run; 4,800/4,800 test cases passed.
 Host: PowerShell 7.6.6 on Linux
 Source revision: 7c19c3a5da3f6f81bccdf3044f690e35bfbc60d7

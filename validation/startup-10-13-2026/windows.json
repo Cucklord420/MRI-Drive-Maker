@@ -1,0 +1,58 @@
+{
+  "Date": "10-13-2026",
+  "PowerShellVersion": "5.1.26100.33438",
+  "Platform": "Win32NT",
+  "Passed": 8,
+  "Failed": 0,
+  "Tests": [
+    {
+      "Name": "Direct -File launch with default configuration from another folder",
+      "Passed": true,
+      "Error": "",
+      "ElapsedSeconds": 0.516
+    },
+    {
+      "Name": "Direct -File launch accepts an explicit configuration path",
+      "Passed": true,
+      "Error": "",
+      "ElapsedSeconds": 0.396
+    },
+    {
+      "Name": "Direct -File launch accepts an empty configuration path",
+      "Passed": true,
+      "Error": "",
+      "ElapsedSeconds": 0.377
+    },
+    {
+      "Name": "Legacy MRI_CreatorV3.ps1 launches the current menu",
+      "Passed": true,
+      "Error": "",
+      "ElapsedSeconds": 0.409
+    },
+    {
+      "Name": "Legacy MRI_CreatorV4.ps1 launches the current menu",
+      "Passed": true,
+      "Error": "",
+      "ElapsedSeconds": 0.385
+    },
+    {
+      "Name": "Main entry point runs the full simulated suite via -File -Action SelfTest",
+      "Passed": true,
+      "Error": "",
+      "ElapsedSeconds": 3.666
+    },
+    {
+      "Name": "Validation runner resolves omitted paths after -File parameter binding",
+      "Passed": true,
+      "Error": "",
+      "ElapsedSeconds": 3.327
+    },
+    {
+      "Name": "Start-MRI-Batch.cmd launches Windows PowerShell 5.1 from a folder with spaces and ampersand",
+      "Passed": true,
+      "Error": "",
+      "ElapsedSeconds": 0.406
+    }
+  ],
+  "Scope": "Real entry points with menu input mocked in the temporary copy, mocked build suite, validation runner; no USB or MRI payload access."
+}

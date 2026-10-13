@@ -1,0 +1,52 @@
+{
+  "Date": "10-13-2026",
+  "PowerShellVersion": "7.6.6",
+  "Platform": "Unix",
+  "Passed": 7,
+  "Failed": 0,
+  "Tests": [
+    {
+      "Name": "Direct -File launch with default configuration from another folder",
+      "Passed": true,
+      "Error": "",
+      "ElapsedSeconds": 0.429
+    },
+    {
+      "Name": "Direct -File launch accepts an explicit configuration path",
+      "Passed": true,
+      "Error": "",
+      "ElapsedSeconds": 0.306
+    },
+    {
+      "Name": "Direct -File launch accepts an empty configuration path",
+      "Passed": true,
+      "Error": "",
+      "ElapsedSeconds": 0.32
+    },
+    {
+      "Name": "Legacy MRI_CreatorV3.ps1 launches the current menu",
+      "Passed": true,
+      "Error": "",
+      "ElapsedSeconds": 0.311
+    },
+    {
+      "Name": "Legacy MRI_CreatorV4.ps1 launches the current menu",
+      "Passed": true,
+      "Error": "",
+      "ElapsedSeconds": 0.311
+    },
+    {
+      "Name": "Main entry point runs the full simulated suite via -File -Action SelfTest",
+      "Passed": true,
+      "Error": "",
+      "ElapsedSeconds": 1.812
+    },
+    {
+      "Name": "Validation runner resolves omitted paths after -File parameter binding",
+      "Passed": true,
+      "Error": "",
+      "ElapsedSeconds": 2.461
+    }
+  ],
+  "Scope": "Real entry points with menu input mocked in the temporary copy, mocked build suite, validation runner; no USB or MRI payload access."
+}
