@@ -64,6 +64,14 @@ try {
         Copy-Item -LiteralPath (Join-Path $root $name) -Destination $app
     }
     Copy-Item -LiteralPath (Join-Path $root 'tests') -Destination $app -Recurse
+    # Console input is a host capability, not part of the path regression.
+    # Only the temporary copy exports a fixed Q response so headless Windows
+    # runners can exit the real menu without relying on a console keyboard.
+    [IO.File]::AppendAllText((Join-Path $app 'MRI.Batch.psm1'), @'
+
+function Read-Host { param([string]$Prompt); return 'Q' }
+Export-ModuleMember -Function '*-MRI*','Initialize-MRINative','Read-Host'
+'@)
     $entry=Join-Path $app 'MRI-Batch.ps1'
     Test-Startup 'Direct -File launch with default configuration from another folder' {
         Check-Menu (Invoke-Script $entry -InputText "Q`n")
@@ -110,7 +118,7 @@ try {
     $summary=[ordered]@{
         Date='10-13-2026'; PowerShellVersion=$PSVersionTable.PSVersion.ToString()
         Platform=[Environment]::OSVersion.Platform.ToString(); Passed=$results.Count-$failed; Failed=$failed
-        Tests=$results.ToArray(); Scope='Startup, menu, mocked build suite, validation runner; no USB or MRI payload access.'
+        Tests=$results.ToArray(); Scope='Real entry points with menu input mocked in the temporary copy, mocked build suite, validation runner; no USB or MRI payload access.'
     }
     if (-not [string]::IsNullOrWhiteSpace($ResultsPath)) { Write-MRIJson $ResultsPath $summary }
     Write-Host "`n$($results.Count-$failed)/$($results.Count) startup tests passed."
