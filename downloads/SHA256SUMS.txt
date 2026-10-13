@@ -1,1 +1,2 @@
 583ba3aaa13ad7f878d93b77eb95a090171178cb84c96ba5616ef5aff809cd95  MRI-Drive-Maker-v0.1.0.zip
+61449d6643c1abaab34cbca9da14cddc42d3e769d2f26b97188998f9da49a482  MRI-Drive-Maker-v0.1.1.zip
