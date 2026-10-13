@@ -1,13 +1,18 @@
 #Requires -Version 5.1
 # SPDX-License-Identifier: GPL-3.0-only
-# GPL-3.0-only. Continuous MRI media builder, updated 10-10-2026.
+# GPL-3.0-only. Continuous MRI media builder, updated 10-13-2026.
 [CmdletBinding()]
 param(
     [ValidateSet('Menu','Configure','Enroll','List','Watch','SelfTest')][string]$Action='Menu',
-    [string]$ConfigPath=(Join-Path $PSScriptRoot 'mri-config.json')
+    [string]$ConfigPath
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
+# Windows PowerShell 5.1 initializes $PSScriptRoot after parameter binding
+# when an advanced script is launched with -File. Resolve defaults here.
+if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
+    $ConfigPath=Join-Path $PSScriptRoot 'mri-config.json'
+}
 Import-Module (Join-Path $PSScriptRoot 'MRI.Batch.psm1') -Force -DisableNameChecking
 $DataPath=Join-Path $PSScriptRoot 'Data'
 $RegistryPath=Join-Path $DataPath 'drives.json'

@@ -1,6 +1,6 @@
 # MRI Drive Maker
 
-[Download the v0.1.0 ZIP](https://github.com/Cucklord420/MRI-Drive-Maker/raw/refs/heads/main/downloads/MRI-Drive-Maker-v0.1.0.zip). This preview includes the scripts, guide, license, tests, and portable Git history. Windows hardware and the actual MRI workflow have not yet been validated.
+[Download the v0.1.1 ZIP](https://github.com/Cucklord420/MRI-Drive-Maker/raw/refs/heads/main/downloads/MRI-Drive-Maker-v0.1.1.zip). This preview includes the scripts, guide, license, tests, and portable Git history. It fixes the Windows PowerShell 5.1 startup error in v0.1.0. Windows hardware and the actual MRI workflow have not yet been validated.
 
 Updated 10-10-2026 from [JStone21/MRI-Creation](https://github.com/JStone21/MRI-Creation), upstream commit `aa7bdc528eb95952be3c95710e277025b3eea5be` dated 12-03-2023. GPL-3.0-only; original license and attribution retained. This is an independent community project. It is not affiliated with or endorsed by Best Buy or Geek Squad.
 
@@ -53,6 +53,8 @@ Logs, source manifests, per-drive state, and receipts remain under the workstati
 A FAT32 file cannot exceed 4,294,967,295 bytes. Oversized files and insufficient space are rejected. Robocopy exit codes 8 and above fail the copy; lower codes still require full content verification. Extra source files, outdated source choices, and a batch's own behavior are the operator's responsibility; this wrapper does not decide which MRI release is currently approved.
 
 ## Validation and scope
+
+`tests/StartupSmoke.ps1` launches the real entry points in child PowerShell processes, including the Windows `.cmd` launcher on Windows. It uses an isolated extracted copy, an unrelated working directory, and a folder with spaces and an ampersand. The checks use menu exit and simulated builds only; no USB or proprietary MRI files are accessed. `.github/workflows/powershell.yml` runs these checks and the native process smoke test on Windows PowerShell 5.1. Current CI results are available in [GitHub Actions](https://github.com/Cucklord420/MRI-Drive-Maker/actions).
 
 On 10-10-2026, all 48 simulated PowerShell tests passed in **100 consecutive runs (4,800/4,800 test cases, zero failures)** in PowerShell 7.6.6 on Linux. [The report](validation/100-run/results.json) records per-run results, tested source hashes, timings, and log hashes; the first and last run logs are retained as samples. `tests/Invoke-ValidationRuns.ps1` repeats the suite any number of times and writes timestamped per-run logs plus a fresh `results.json`, so future validation runs are independently verifiable instead of resting on a single stored report. PowerShell scripts parsed and the C# interop compiled. Tests exercised the actual build orchestration, actual temporary-file copies and hashing, atomic reports, identity/volume checks, detection state, erasure restrictions, failed copies/batches, cancellation, unexpected content, receipts, and final-file checks. Storage operations, native Windows process execution, and volume flushing were mocked in the build tests. The code targets Windows PowerShell 5.1 and .NET Framework 4.8 on Windows 10/11; that host has not been exercised here.
 

@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 # SPDX-License-Identifier: GPL-3.0-only
-# Added 10-10-2026 for MRI Drive Maker.
+# Added 10-10-2026; startup defaults corrected 10-13-2026.
 <#
 .SYNOPSIS
     Runs tests/SelfTest.ps1 N times with distinguishable per-run logs.
@@ -25,15 +25,18 @@
 [CmdletBinding()]
 param(
     [int]$Runs = 10,
-    [string]$OutputRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'validation'),
-    [string]$SelfTest = (Join-Path $PSScriptRoot 'SelfTest.ps1')
+    [string]$OutputRoot,
+    [string]$SelfTest
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path $PSScriptRoot -Parent
+# Resolve script-relative defaults after Windows PowerShell 5.1 binds parameters.
+if ([string]::IsNullOrWhiteSpace($OutputRoot)) { $OutputRoot = Join-Path $repoRoot 'validation' }
+if ([string]::IsNullOrWhiteSpace($SelfTest)) { $SelfTest = Join-Path $PSScriptRoot 'SelfTest.ps1' }
 
 if ($Runs -lt 1) { throw 'Runs must be at least 1.' }
 if (-not (Test-Path -LiteralPath $SelfTest -PathType Leaf)) { throw "SelfTest not found: $SelfTest" }
-$repoRoot = Split-Path $PSScriptRoot -Parent
 
 function Get-SourceTreeHash {
     param([string]$Root, [string]$ExcludeDir)
@@ -53,8 +56,8 @@ $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss\Z')
 $runDir = Join-Path $OutputRoot $stamp
 [void][IO.Directory]::CreateDirectory($runDir)
 $sourceHash = Get-SourceTreeHash -Root $repoRoot -ExcludeDir $OutputRoot
-$psVersion = $PSVersionTable.PSVersion.ToString()
-$psEdition = $PSVersionTable.PSEdition
+$engineVersion = $PSVersionTable.PSVersion.ToString()
+$engineEdition = $PSVersionTable.PSEdition
 $platform = [Environment]::OSVersion.Platform.ToString()
 $exe = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
 
@@ -96,7 +99,7 @@ for ($i = 1; $i -le $Runs; $i++) {
         "# Finished (UTC): $finishedUtc",
         ('# Elapsed seconds: {0:N3}' -f $clock.Elapsed.TotalSeconds),
         "# Exit code: $exitCode",
-        "# PowerShell: $psVersion ($psEdition)",
+        "# PowerShell: $engineVersion ($engineEdition)",
         "# Platform: $platform",
         "# Source tree SHA-256: $sourceHash",
         '# Runner: tests/Invoke-ValidationRuns.ps1',
@@ -135,7 +138,7 @@ $summary = [ordered]@{
     started_time    = $suiteStartedUtc
     finished_time   = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     source_sha256   = $sourceHash
-    power_shell_version = "$psVersion ($psEdition)"
+    power_shell_version = "$engineVersion ($engineEdition)"
     platform        = $platform
     completed_runs  = $Runs
     passed_runs     = $passedRuns

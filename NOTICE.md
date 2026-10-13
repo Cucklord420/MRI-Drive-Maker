@@ -15,6 +15,10 @@ preparation, contained batch execution, verified completion, and tests.
 The former V3/V4 entry points now open the new menu. These changes are an
 independent modification; the upstream project was not changed.
 
+**Modified 10-13-2026:** corrected Windows PowerShell 5.1 startup path
+initialization and validation-runner startup, added entry-point regression
+checks and Windows CI, and refreshed the source download.
+
 This entire modified project is released under the **GNU General Public
 License, version 3 only** (`GPL-3.0-only`). Recipients may copy, modify, and
 redistribute it under that license. The full upstream license is preserved

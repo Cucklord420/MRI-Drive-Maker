@@ -1,0 +1,40 @@
+name: PowerShell startup and safety checks
+
+on:
+  push:
+    paths:
+      - '**/*.ps1'
+      - '**/*.psm1'
+      - '**/*.cs'
+      - '**/*.cmd'
+      - 'mri-config.example.json'
+      - '.github/workflows/powershell.yml'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-powershell:
+    name: Windows PowerShell 5.1
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the tested source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Test Windows PowerShell launcher, menus, and simulated builds
+        shell: powershell
+        run: |
+          if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) {
+            throw 'This job must run Windows PowerShell 5.1.'
+          }
+          & ./tests/StartupSmoke.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify native process completion and cancellation
+        shell: powershell
+        run: |
+          & ./tests/WindowsProcessSmoke.ps1
+          if (-not $?) { exit 1 }
