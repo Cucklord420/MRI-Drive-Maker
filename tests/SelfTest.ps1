@@ -36,13 +36,14 @@ $manifest=Get-MRIManifest $source
 $d=Drive
 $record=[pscustomobject]@{ Key=$d.Key; Serial=$d.Serial; PnpId=$d.PnpId; Model=$d.Model; Size=$d.Size; Label='MRI_01'; AllowErase=$true }
 $sim=[pscustomobject]@{ Inventory=@($d); Source=$source; TargetRoot=''; Letter='R'; CopyCode=0; SetupCode=0; CorruptCopy=$false
-    NoPartitions=$false; CorruptSetup=$false; RemoveDuringCopy=$false; SetupCalls=0; CopyCalls=0; FormatCalls=0; FlushCalls=0; AddOutput=$false; FlushFails=$false; AddCopyExtra=$false; AddFinalExtra=$false; HashCalls=0 }
+    NoPartitions=$false; PartitionError=$false; ActualPartitionStyle='RAW'; CorruptSetup=$false; RemoveDuringCopy=$false; SetupCalls=0; CopyCalls=0; FormatCalls=0; FlushCalls=0; AddOutput=$false; FlushFails=$false; AddCopyExtra=$false; AddFinalExtra=$false; HashCalls=0 }
 $module=Get-Module MRI.Batch
 & $module {
     param($sim)
     $script:Sim=$sim
     function script:Get-MRIInventory { $script:Sim.Inventory }
-    function script:Get-Partition { param($DiskNumber); if ($script:Sim.NoPartitions) { return }; [pscustomobject]@{DiskNumber=$DiskNumber; PartitionNumber=1; IsBoot=$false; IsSystem=$false} }
+    function script:Get-Partition { param($DiskNumber); if ($script:Sim.PartitionError) { throw 'No MSFT_Partition objects found.' }; if ($script:Sim.NoPartitions) { return }; [pscustomobject]@{DiskNumber=$DiskNumber; PartitionNumber=1; IsBoot=$false; IsSystem=$false} }
+    function script:Get-Disk { param($Number); [pscustomobject]@{Number=$Number;PartitionStyle=$script:Sim.ActualPartitionStyle} }
     function script:Get-MRITargetVolume {
         param($Drive)
         [pscustomobject]@{Path=$script:Sim.TargetRoot; Letter=$script:Sim.Letter; Number=$Drive.Number; PartitionNumber=1; FileSystem='FAT32'; FreeBytes=[long]30000000000}
@@ -92,7 +93,7 @@ function Reset-Case {
     $sim.Inventory=@(Drive); $sim.NoPartitions=$false; $sim.Letter='R'; $sim.CopyCode=0; $sim.SetupCode=0; $sim.CorruptCopy=$false
     $sim.CorruptSetup=$false; $sim.RemoveDuringCopy=$false; $sim.SetupCalls=0; $sim.CopyCalls=0; $sim.FormatCalls=0
     $sim.FlushCalls=0; $sim.AddOutput=$false; $sim.FlushFails=$false; $sim.AddCopyExtra=$false
-    $sim.AddFinalExtra=$false; $sim.HashCalls=0
+    $sim.AddFinalExtra=$false; $sim.HashCalls=0; $sim.PartitionError=$false; $sim.ActualPartitionStyle='RAW'
     $script:cfg=($baseConfig | ConvertTo-Json -Depth 6 | ConvertFrom-Json)
     $script:state=Join-Path $caseRoot 'state.json'; $script:receipt=Join-Path $caseRoot 'receipt.json'
     $script:cancel=Join-Path $caseRoot 'cancel'
@@ -274,6 +275,18 @@ try {
         Write-MRIJson $receipt $old; $cfg.MaxParallel=30
         $r=Build; Check ($r.Success -and $r.AlreadyReady); Check ($sim.CopyCalls -eq 1)
         Check ((Read-MRIJson $receipt).RecipeVersion -eq 2)
+    }
+    Test 'The Windows no-partitions error permits preparation only when the live disk is RAW' {
+        Reset-Case; $cfg.PrepareDisk=$true; $sim.PartitionError=$true
+        $r=Build; Check $r.Success; Check ($sim.FormatCalls -eq 1)
+        Reset-Case; $cfg.PrepareDisk=$true; $sim.PartitionError=$true; $sim.ActualPartitionStyle='MBR'
+        $r=Build; Check (-not $r.Success); Check ($sim.FormatCalls -eq 0 -and $sim.CopyCalls -eq 0)
+    }
+    Test 'An empty source cannot reach preparation even with no required filenames' {
+        Reset-Case; $cfg.SetupBatch=''; $cfg.RequiredFiles=@(); $cfg.PrepareDisk=$true
+        $empty=[pscustomobject]@{Entries=@();TotalBytes=0;Digest='empty'}
+        $r=Invoke-MRIBuild $record $cfg $empty @() $state $receipt (Join-Path $caseRoot 'Logs') $cancel
+        Check (-not $r.Success); Check ($sim.FormatCalls -eq 0 -and $sim.CopyCalls -eq 0)
     }
     Write-Host "`n$($count-$failures.Count)/$count tests passed. All storage/process APIs in build tests were simulated."
     if ($failures.Count) { $failures | ForEach-Object { Write-Host $_ }; exit 1 }

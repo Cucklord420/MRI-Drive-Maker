@@ -309,6 +309,18 @@ function Get-MRITargetVolume {
     [pscustomobject]@{ Path=[string]$v.Path; Letter=$letter; Number=$Drive.Number
         PartitionNumber=$p.PartitionNumber; FileSystem=[string]$v.FileSystem; FreeBytes=[long]$v.SizeRemaining }
 }
+function Get-MRIExistingPartitions {
+    param([int]$DiskNumber)
+    try { Get-Partition -DiskNumber $DiskNumber -ErrorAction Stop }
+    catch {
+        $originalError=$_
+        # Get-Partition throws for a real, newly attached RAW disk. Do not
+        # suppress other inventory failures or assume a formatted disk is empty.
+        $disk=Get-Disk -Number $DiskNumber -ErrorAction Stop
+        if ($disk.Number -eq $DiskNumber -and [string]$disk.PartitionStyle -eq 'RAW') { return }
+        throw $originalError
+    }
+}
 function Assert-MRITarget {
     param($Record, $Config, $Target, [string[]]$ProtectedKeys=@())
     $d=Assert-MRIDrive $Record $Config $ProtectedKeys $Target.Number
@@ -596,7 +608,7 @@ function Invoke-MRIBuild {
             if ($receipt.Key -ne $Record.Key -or $receipt.Status -ne 'READY') { throw 'Invalid previous drive receipt.' }
         }
         $alreadyVerified=$false
-        $parts=@(Get-Partition -DiskNumber $number -ErrorAction Stop)
+        $parts=@(Get-MRIExistingPartitions $number)
         if ($parts.Count -gt 0) {
             $target=Get-MRITargetVolume $drive -RequireDriveLetter $runSetup
             $guardClock=[Diagnostics.Stopwatch]::StartNew()
