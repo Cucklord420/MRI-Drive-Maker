@@ -165,7 +165,12 @@ function Open-MRISource {
     $kind=Get-MRISourceKind $Config
     $context=[pscustomobject]@{ Path=''; InputPath=[IO.Path]::GetFullPath($Config.SourcePath); MountedIso=''; OwnsMount=$false; CacheDirectory=''; Stamp=$null }
     try {
-        if ($kind -eq 'Folder') { $context.Path=Get-MRIMediaRoot $context.InputPath; return $context }
+        if ($kind -eq 'Folder') {
+            Assert-MRIPlainDirectory $context.InputPath
+            # The selected folder's contents belong at the USB root. Do not
+            # silently flatten a legitimate single child directory.
+            $context.Path=$context.InputPath; return $context
+        }
         $inputFile=Get-Item -LiteralPath $context.InputPath -Force -ErrorAction Stop
         if ($inputFile.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'The ISO/ZIP source cannot be a link.' }
         Assert-MRIPlainDirectory $inputFile.Directory.FullName
@@ -187,7 +192,8 @@ function Open-MRISource {
         }
         $volumes=@($image | Get-Volume -ErrorAction Stop)
         if ($volumes.Count -ne 1 -or -not $volumes[0].DriveLetter) { throw 'The ISO did not expose one readable mounted volume.' }
-        $context.Path=Get-MRIMediaRoot ([string]$volumes[0].DriveLetter+':\')
+        $context.Path=[string]$volumes[0].DriveLetter+':\'
+        Assert-MRIPlainDirectory $context.Path
         return $context
     } catch { Close-MRISource $context; throw }
 }

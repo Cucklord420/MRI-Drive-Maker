@@ -1,4 +1,29 @@
-MRI Drive Maker v0.2.0 audit — 10-14-2026
+MRI Drive Maker v0.3.0 concurrency review — 10-14-2026
+Windows PowerShell 5.1.26100.33438 on Windows Server 2025:
+8/8 startup; 64/64 simulated build; 13/13 source/identity; 2/2 native process;
+8/8 owned ISO/VHD; 5/5 four-VHD parallel preparation/copy checks passed.
+The candidate ZIP passed both layout/hash and actual Windows launcher checks.
+Windows-tested source: edafad3c5202a252ce4f5a39b694ee93c0991a22
+CI: https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38521002885
+Evidence: validation/concurrency-10-14-2026/windows-pass.txt
+The final archive and added exact-folder-root check are verified after packaging.
+
+Four actual copy-worker process lifetimes overlapped. Real preparation,
+partitioning, FAT32 formatting, volume-GUID root copying, file hashes and flushes
+passed on owned temporary file-backed VHDs with no drive letters assigned.
+Only test inventory/classification and a guard bound exclusively to those owned
+VHDs were substituted. No physical USB was formatted or written.
+The first Windows run exposed a RAW/no-partition discovery failure; only
+confirmed RAW disks now allow that condition. Formatted-disk errors still block.
+The Linux build suite also passes 64/64 cases. Source/path/hash checks pass 14/14
+including preservation of an exact selected-folder root. Seven applicable
+startup checks passed before the final RAW/root additions.
+
+No physical 30-USB speed benchmark, Windows 10/11 workstation, actual MRI image,
+BDE tool, Secure Boot or firmware boot test is available. READY means verified
+contents and accepted flushing, not demonstrated firmware boot compatibility.
+
+Historical v0.2.0 audit — 10-14-2026
 Windows PowerShell 5.1.26100.33438 on Windows Server 2025:
 8/8 startup checks; 56/56 simulated build cases; 10/10 source/identity checks;
 2/2 native process checks; 8/8 owned ISO/VHD storage checks passed.

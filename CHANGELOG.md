@@ -9,6 +9,8 @@
 - Reject Windows device aliases and unexpected final extra files in direct mode. Retain physical identity, source/system exclusions, unknown-content protection and per-drive erase consent.
 - Exclude operational settings from media recipes and safely migrate matching old direct-copy receipts. Required filenames are optional; empty sources remain blocked before preparation.
 - Add 30-drive queue/security regressions and four owned-VHD Windows builds covering concurrent preparation/copying, letter-free targets, process overlap and verification. No physical USB/MRI boot or throughput claim is made.
+- Fixed a real Windows RAW-disk failure: partition discovery reports no partitions as an error. Only confirmed RAW disks can proceed without partitions; formatted-disk inventory errors still block writes.
+- Preserve the selected folder and mounted ISO root exactly rather than flattening legitimate single-child folders.
 
 ## 10-14-2026 — v0.2.0 ISO source and audit fixes
 

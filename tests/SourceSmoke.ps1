@@ -37,6 +37,16 @@ try {
         [void][IO.Directory]::CreateDirectory($wrapped); Copy-Item -LiteralPath $folder -Destination $inside -Recurse
         Check ((Get-MRIMediaRoot $wrapped) -eq $inside)
     }
+    Test-Source 'A selected folder containing one child directory preserves that directory at the USB root' {
+        $root=Join-Path $temp 'single-directory-source'; $child=Join-Path $root 'assets'
+        [void][IO.Directory]::CreateDirectory($child); [IO.File]::WriteAllText((Join-Path $child 'payload.txt'),'fixture')
+        $folderCfg=($cfg | ConvertTo-Json | ConvertFrom-Json); $folderCfg.SourcePath=$root; $folderCfg.RequiredFiles=@()
+        $opened=Open-MRISource $folderCfg (Join-Path $temp 'cache')
+        Check ($opened.Path -eq $root)
+        $layout=Get-MRIManifest $opened.Path -NoHash
+        Check (@($layout.Entries | Where-Object { $_.RelativePath -eq 'assets\payload.txt' }).Count -eq 1)
+        Close-MRISource $opened
+    }
     Test-Source 'ZIP contents open in an isolated cache and are removed on close' {
         $zip=Join-Path $temp 'source.zip'; Make-Zip $zip @('MRI/efi/boot/bootx64.efi','MRI/payload.dat')
         $zipCfg=($cfg | ConvertTo-Json | ConvertFrom-Json); $zipCfg.SourceKind='ZIP'; $zipCfg.SourcePath=$zip
