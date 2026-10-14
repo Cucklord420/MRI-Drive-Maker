@@ -1,0 +1,54 @@
+PASS PowerShell files parse without errors
+PASS C# interop source compiles
+PASS Source configuration validates
+PASS Missing source batch is rejected
+PASS CMD metacharacters in batch arguments are rejected
+PASS Traversal and absolute relative paths are rejected
+PASS Blank or unusable serial numbers are rejected
+PASS Identity includes hardware serial, PNP, model, and size
+PASS Boot and system drives are protected
+PASS Read-only and offline drives are protected
+PASS Source and tool disks are protected
+PASS Wrong capacity is rejected
+PASS Duplicate attached serials are rejected
+PASS Duplicate serial in registry is rejected
+PASS Changed disk number is rejected
+PASS Replacement USB is rejected even if it reuses the disk number
+PASS Volume or letter remapping is rejected
+PASS Unknown drives are not queued
+PASS Registered drive queues only after stable detection
+PASS A drive is not retried repeatedly while attached
+PASS Disconnect clears the attachment tracker
+PASS CMD arguments expand placeholders without command injection
+PASS Native argument quoting protects spaces and trailing backslashes
+PASS Atomic JSON write replaces existing files correctly
+PASS Successful build copies, runs setup, verifies, flushes, and saves receipt
+PASS Nonempty unknown content blocks preparation without reading/erasing it
+PASS Copy failure never launches setup or creates a success receipt
+PASS Corrupt copied file is detected before setup
+PASS USB removal during copying stops the build
+PASS Batch nonzero exit never marks media ready
+PASS Unexpected post-setup modifications fail final verification
+PASS Only explicitly mutable source files may change during setup
+PASS Missing required setup output fails completion
+PASS Flush failure prevents a ready receipt
+PASS Cancellation prevents copy and setup
+PASS Protected source disk cannot reach formatting or copying
+PASS Automatic preparation needs per-drive erase registration
+PASS Preparation runs only for a specifically registered empty drive
+PASS Successful unchanged drive is verified and skipped on reinsertion
+PASS Added client file invalidates a previous ready receipt
+PASS Corrupted previous output cannot be erased or trusted
+PASS Recipe changes require fresh media in copy-only mode
+PASS FAT32 oversized source file is rejected before copy
+PASS Insufficient free space fails before writing
+PASS An emptied drive cannot reuse a stale ready receipt
+PASS Failed refresh invalidates the old ready receipt before changing media
+PASS Unexpected copied paths prevent setup
+PASS Removal of a source USB prevents a build
+FAIL Direct copy works without a setup batch: Assertion failed
+FAIL Cancellation before a raw-drive build prevents formatting: Cancelled raw drive was formatted.
+
+48/50 tests passed. All storage/process APIs in build tests were simulated.
+Direct copy works without a setup batch: Assertion failed
+Cancellation before a raw-drive build prevents formatting: Cancelled raw drive was formatted.

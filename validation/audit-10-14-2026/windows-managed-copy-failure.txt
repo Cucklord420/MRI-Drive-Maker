@@ -1,0 +1,36 @@
+2026-10-14T04:14:00.7314365Z PASS Direct -File launch with default configuration from another folder
+2026-10-14T04:14:01.2030061Z PASS Direct -File launch accepts an explicit configuration path
+2026-10-14T04:14:01.6537592Z PASS Direct -File launch accepts an empty configuration path
+2026-10-14T04:14:02.1284720Z PASS Legacy MRI_CreatorV3.ps1 launches the current menu
+2026-10-14T04:14:02.5911588Z PASS Legacy MRI_CreatorV4.ps1 launches the current menu
+2026-10-14T04:14:07.0759214Z   56/56 tests passed.
+2026-10-14T04:14:07.0768300Z PASS Main entry point runs the full simulated suite via -File -Action SelfTest
+2026-10-14T04:14:11.1957925Z PASS Validation runner resolves omitted paths after -File parameter binding
+2026-10-14T04:14:11.6859882Z PASS Start-MRI-Batch.cmd launches Windows PowerShell 5.1 from a folder with spaces and ampersand
+2026-10-14T04:14:11.7054890Z 8/8 startup tests passed.
+2026-10-14T04:14:11.7104838Z     "PowerShellVersion":  "5.1.26100.33438",
+2026-10-14T04:14:15.0928425Z PASS: parent exit did not cause premature completion; its child finished first.
+2026-10-14T04:14:15.7616901Z PASS: cancellation terminated the remaining child process.
+2026-10-14T04:14:16.4572071Z PASS Extracted source folders open without a setup batch
+2026-10-14T04:14:16.4771023Z PASS Single wrapper folders resolve to the actual boot-file root
+2026-10-14T04:14:16.5791554Z PASS ZIP contents open in an isolated cache and are removed on close
+2026-10-14T04:14:16.6034927Z PASS Archive traversal paths are rejected before extraction
+2026-10-14T04:14:16.6109192Z PASS Archive case-insensitive duplicate paths are rejected
+2026-10-14T04:14:16.6143208Z PASS Unknown source kinds are rejected
+2026-10-14T04:14:16.6289495Z PASS A cancelled storage-object query cannot reach disk APIs
+2026-10-14T04:14:16.6945916Z PASS A matching fresh storage object is returned for the registered physical drive
+2026-10-14T04:14:16.7061095Z PASS A replacement reusing the displayed disk number is blocked before erasure
+2026-10-14T04:14:16.7115146Z PASS A fresh non-USB storage object is blocked even when inventory says USB
+2026-10-14T04:14:16.7154604Z 10/10 source tests passed.
+2026-10-14T04:14:19.4315178Z PASS Windows storage cmdlets expose the parameter sets used by the builder
+2026-10-14T04:14:20.9766732Z PASS A real ISO opens read-only and exposes its contained boot-file tree
+2026-10-14T04:14:21.0407750Z PASS An existing ISO mount is reused and not ejected by a second source context
+2026-10-14T04:14:25.9117732Z PASS Actual FAT32 volume GUID paths can be enumerated safely
+2026-10-14T04:14:27.5535510Z Exception calling "CreateDirectory" with "1" argument(s): "The filename, directory name, or volume label syntax is incorrect.
+2026-10-14T04:14:27.5588102Z FAIL ISO-to-volume copy runs the real copy worker, verification and volume flushing: The copy worker reported failure (exit 1).
+2026-10-14T04:14:27.7475221Z FAIL Actual verified media is skipped on reinsertion: Assertion failed
+2026-10-14T04:14:28.0162783Z PASS Unexpected content on the virtual target prevents a second copy
+2026-10-14T04:14:28.2649942Z PASS Destructive storage guard rejects a file-backed disk even with mocked USB inventory
+2026-10-14T04:14:28.2676129Z 6/8 Windows storage checks passed. Only owned ISO/VHD fixtures were used.
+2026-10-14T04:14:30.4021552Z PASS Packaged source hashes and the single obvious launcher are correct.
+2026-10-14T04:14:30.9167379Z PASS The actual packaged top-level launcher opens the ISO menu on Windows PowerShell 5.1.

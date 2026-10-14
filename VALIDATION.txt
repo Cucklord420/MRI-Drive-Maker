@@ -1,3 +1,31 @@
+MRI Drive Maker v0.2.0 audit — 10-14-2026
+Windows PowerShell 5.1.26100.33438 on Windows Server 2025:
+8/8 startup checks; 56/56 simulated build cases; 10/10 source/identity checks;
+2/2 native process checks; 8/8 owned ISO/VHD storage checks passed.
+The candidate package also passed both hash/layout and actual CMD launch checks.
+Windows-tested runtime revision: 3a5032754728a4067ef79437945102015ff53230
+CI: https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38510584392
+Evidence and runtime hashes: validation/audit-10-14-2026/results.json
+
+The final archive is checked separately after packaging the evidence.
+The Windows storage check mounts a real test ISO, creates/formats only its own
+file-backed VHD, copies via native Unicode Windows file APIs into a volume GUID,
+verifies hashes, flushes the volume, checks reinsertion, and preserves unexpected files.
+Only USB classification is mocked for that VHD; the erase guard rejects the VHD.
+Two real copy failures were exposed and fixed: Robocopy error 53/exit 16 on a
+volume GUID, then managed recursive directory creation rejecting the same path.
+The fixed copy worker retains job containment, cancellation and timeout checks.
+
+Before the new fixes, the old module passed 48 existing simulated cases but failed
+both added regressions: no-batch copying and cancellation before raw-drive formatting.
+Only simulated storage was used for that failure reproduction. The corrected
+56-case suite passes locally on PowerShell 7.6.6/Linux and on Windows 5.1 above.
+No physical USB, actual MRI source, BDE-to-USB program, Windows 10/11 workstation,
+Secure Boot or firmware boot has been tested. READY means verified files and
+accepted write flush, not a demonstrated bootable MRI drive or BDE equivalence.
+
+Historical evidence follows; each result applies to its recorded source revision.
+
 MRI Drive Maker v0.1.1 startup validation — 10-13-2026
 Windows PowerShell 5.1.26100.33438 on Windows Server 2025 CI:
 8/8 startup checks, 48/48 simulated build cases, 2/2 native process checks passed.

@@ -1,0 +1,12 @@
+PASS Extracted source folders open without a setup batch
+PASS Single wrapper folders resolve to the actual boot-file root
+PASS ZIP contents open in an isolated cache and are removed on close
+PASS Archive traversal paths are rejected before extraction
+PASS Archive case-insensitive duplicate paths are rejected
+PASS Unknown source kinds are rejected
+PASS A cancelled storage-object query cannot reach disk APIs
+PASS A matching fresh storage object is returned for the registered physical drive
+PASS A replacement reusing the displayed disk number is blocked before erasure
+PASS A fresh non-USB storage object is blocked even when inventory says USB
+
+10/10 source tests passed.

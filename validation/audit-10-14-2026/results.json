@@ -1,0 +1,58 @@
+{
+  "date": "10-14-2026",
+  "baseline_source": "b4921e4d08a2f011921a8a4afd34574c8768f201",
+  "baseline_regressions": {
+    "passed": 48,
+    "total": 50,
+    "failed": [
+      "Direct copy works without a setup batch",
+      "Cancellation before a raw-drive build prevents formatting"
+    ]
+  },
+  "windows_tested_source": "3a5032754728a4067ef79437945102015ff53230",
+  "windows_ci": "https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38510584392",
+  "windows_job": 115677918099,
+  "windows_os": "Windows Server 2025",
+  "windows_powershell": "5.1.26100.33438",
+  "windows_checks": {
+    "startup": 8,
+    "simulated_build": 56,
+    "source_and_storage_identity": 10,
+    "native_process": 2,
+    "owned_iso_vhd_storage": 8,
+    "candidate_package": 2
+  },
+  "candidate_package_source": "2cd0bc030de03d77dd6d7fb69a6454ab57c53990",
+  "candidate_package_scope": "Single-launcher layout, per-file hashes and actual CMD menu launch. Final archive is verified in the subsequent release check.",
+  "linux_checks": {
+    "powershell": "7.6.6",
+    "startup_before_copy_worker_change": 7,
+    "simulated_build_after_copy_worker_change": 56,
+    "source_and_storage_identity": 10
+  },
+  "runtime_sha256": {
+    "MRI-Batch.ps1": "47ee2a956c7dbf53fd223c73eae3748deda328fedae1e182c5c88b59e7453287",
+    "MRI.Batch.psm1": "157f42595c78a97accc8f55cf8eece7ceea47df7c647054fb0eaa45a32d071f0",
+    "Copy-MRIFiles.ps1": "b27bc2807f437c37b531881345eee8b5310d8cf0fe64b0c3abb94e76151dd388",
+    "NativeProcess.cs": "df7d60f74a11030718220363fc357ff855a9701afbe4ad82a8c8669751e9a808",
+    "mri-config.example.json": "87f672831b313207fab05558d4dffe0acd11da0489521262274cb038860cf0b5",
+    "START-MRI-DRIVE-MAKER.cmd": "042b9d4d7c0b1c124026f38dbdcdfaaa9277232dd8b81f27b8166870c74eb88e"
+  },
+  "failed_windows_runs": [
+    {
+      "run": "https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38509834835",
+      "cause": "Robocopy error 53/exit 16 accessing the volume GUID destination."
+    },
+    {
+      "run": "https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38510300921",
+      "cause": "The managed recursive Directory.CreateDirectory call rejected the volume GUID path."
+    }
+  ],
+  "correction": "Contained copy worker calls native Unicode CreateDirectoryW and CopyFileW. Destination stays a volume GUID. Existing destination files cannot be overwritten.",
+  "scope_limits": [
+    "No proprietary MRI image or BDE-to-USB executable available.",
+    "No physical USB, firmware boot, Secure Boot or Windows 10/11 workstation test.",
+    "USB classification is mocked for the owned VHD copy check. Destructive guard rejects it.",
+    "The ISO contains non-bootable fixture files; READY is a content verification result."
+  ]
+}

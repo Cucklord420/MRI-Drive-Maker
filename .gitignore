@@ -9,3 +9,6 @@ mri-config.json
 !/validation/100-run/**
 !/validation/startup-10-13-2026/
 !/validation/startup-10-13-2026/**
+
+!/validation/audit-10-14-2026/
+!/validation/audit-10-14-2026/**
