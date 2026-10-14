@@ -203,6 +203,21 @@ function Close-MRISource {
     if ($Context.OwnsMount) { Dismount-DiskImage -ImagePath $Context.MountedIso -ErrorAction Stop | Out-Null; $Context.OwnsMount=$false }
     if ($Context.CacheDirectory -and [IO.Directory]::Exists($Context.CacheDirectory)) { Remove-Item -LiteralPath $Context.CacheDirectory -Recurse -Force -ErrorAction Stop }
 }
+function Assert-MRISourceSeparation {
+    param($Context,[string]$ApplicationPath)
+    $separator=[IO.Path]::DirectorySeparatorChar
+    $source=[IO.Path]::GetFullPath($Context.Path).TrimEnd([char[]]@('\','/'))+$separator
+    $application=[IO.Path]::GetFullPath($ApplicationPath).TrimEnd([char[]]@('\','/'))+$separator
+    $ownedCache=$false
+    if ($Context.CacheDirectory) {
+        $cache=[IO.Path]::GetFullPath($Context.CacheDirectory).TrimEnd([char[]]@('\','/'))+$separator
+        $ownedCache=$source.StartsWith($cache,[StringComparison]::OrdinalIgnoreCase)
+    }
+    if ($application.StartsWith($source,[StringComparison]::OrdinalIgnoreCase) -or
+        ($source.StartsWith($application,[StringComparison]::OrdinalIgnoreCase) -and -not $ownedCache)) {
+        throw 'Keep the official MRI source folder separate from the automation folder.'
+    }
+}
 function Assert-MRIInputSource {
     param($Config)
     if ($null -eq $Config.PSObject.Properties['InputStamp'] -or $null -eq $Config.InputStamp) { return }

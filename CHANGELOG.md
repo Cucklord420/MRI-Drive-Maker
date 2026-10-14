@@ -11,6 +11,7 @@
 - Add 30-drive queue/security regressions and four owned-VHD Windows builds covering concurrent preparation/copying, letter-free targets, process overlap and verification. No physical USB/MRI boot or throughput claim is made.
 - Fixed a real Windows RAW-disk failure: partition discovery reports no partitions as an error. Only confirmed RAW disks can proceed without partitions; formatted-disk inventory errors still block writes.
 - Preserve the selected folder and mounted ISO root exactly rather than flattening legitimate single-child folders.
+- Permit only owned ZIP source caches within a source checkout; continue blocking source/program overlap. This fixes ZIP watching when launching the source checkout instead of the packaged App layout.
 
 ## 10-14-2026 — v0.2.0 ISO source and audit fixes
 

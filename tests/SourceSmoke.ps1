@@ -55,6 +55,18 @@ try {
         $cache=$opened.CacheDirectory; Close-MRISource $opened; Check (-not [IO.Directory]::Exists($cache))
         Check ([IO.File]::Exists($zip))
     }
+    Test-Source 'Owned ZIP caches inside a source checkout are allowed without allowing source/program overlap' {
+        $app=Join-Path $temp 'source checkout'; [void][IO.Directory]::CreateDirectory($app)
+        $zip=Join-Path $temp 'checkout-source.zip'; Make-Zip $zip @('EFI/boot/bootx64.efi','payload.dat')
+        $zipCfg=($cfg | ConvertTo-Json | ConvertFrom-Json); $zipCfg.SourceKind='ZIP'; $zipCfg.SourcePath=$zip
+        $opened=Open-MRISource $zipCfg (Join-Path $app 'Data/Sources')
+        try { Assert-MRISourceSeparation $opened $app } finally { Close-MRISource $opened }
+        foreach ($source in @($app,(Join-Path $app 'unapproved-source'),$temp)) {
+            $caught=$false
+            try { Assert-MRISourceSeparation ([pscustomobject]@{Path=$source;CacheDirectory=''}) $app } catch { $caught=$true }
+            Check $caught
+        }
+    }
     Test-Source 'Archive traversal paths are rejected before extraction' {
         foreach ($name in @('../escape.txt','/absolute.txt','C:/absolute.txt','EFI/../escape.txt')) {
             $zip=Join-Path $temp ([guid]::NewGuid().ToString('N')+'.zip'); Make-Zip $zip @($name)

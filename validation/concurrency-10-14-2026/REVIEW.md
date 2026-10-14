@@ -18,6 +18,8 @@ The four-disk check creates only new, explicitly owned file-backed VHDs. USB inv
 
 Selected folders and mounted ISO roots are preserved; a legitimate single subdirectory is not silently flattened. New recipes have no assumed boot filename and reject empty sources before preparation. ZIP wrapper handling remains supported.
 
+The source/program overlap check now permits only the source cache created and owned by the ZIP loader inside a checkout. This fixes ZIP watching from the source checkout's Data folder while continuing to reject ordinary selected-source overlap with program files.
+
 Physical USB throughput, a simultaneous 30-device hardware run, a Windows 10/11 store workstation, the actual MRI payload and firmware bootability are not verified. Parallelism shares source/USB bandwidth and uses more memory/CPU. No measured speedup or new hardware purchase is claimed. Software TCO is $0; existing hardware, electricity and staff costs vary.
 
 Primary documentation reviewed:

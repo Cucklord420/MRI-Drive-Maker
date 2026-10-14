@@ -158,11 +158,7 @@ function Watch-Media {
         $cfg | Add-Member -NotePropertyName RecipeIdentity -NotePropertyValue $recipeIdentity -Force
         $cfg | Add-Member -NotePropertyName InputStamp -NotePropertyValue $opened.Stamp -Force
         Assert-MRIPlainDirectory $PSScriptRoot
-        $source=[IO.Path]::GetFullPath($cfg.SourcePath).TrimEnd('\')+'\'
-        $application=[IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\')+'\'
-        if ($source.StartsWith($application,[StringComparison]::OrdinalIgnoreCase) -or $application.StartsWith($source,[StringComparison]::OrdinalIgnoreCase)) {
-            throw 'Keep the official MRI source folder separate from the automation folder.'
-        }
+        Assert-MRISourceSeparation $opened $PSScriptRoot
         [void][IO.Directory]::CreateDirectory($run)
         Write-Host 'Reading the source once and hashing every file. This can take a few minutes.'
         $manifest=Get-MRIManifest $cfg.SourcePath
