@@ -1,0 +1,41 @@
+name: PowerShell static analysis
+
+on:
+  push:
+    paths:
+      - '**/*.ps1'
+      - '**/*.psm1'
+      - '.github/workflows/static-analysis.yml'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: PSScriptAnalyzer (errors)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install PSScriptAnalyzer
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Install-Module PSScriptAnalyzer -Repository PSGallery -Scope CurrentUser -Force -ErrorAction Stop
+
+      - name: Check PowerShell scripts and modules
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $issues = @(Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error -ErrorAction Stop)
+          if ($issues.Count -gt 0) {
+            $issues | Format-Table -AutoSize | Out-String | Write-Output
+            throw "PSScriptAnalyzer found $($issues.Count) error(s)."
+          }
+          Write-Output 'PSScriptAnalyzer found no errors.'
