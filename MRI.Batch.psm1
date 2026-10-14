@@ -437,6 +437,14 @@ function Invoke-MRISetupCommand {
         if ($mutex) { if ($owned) { $mutex.ReleaseMutex() }; $mutex.Dispose() }
     }
 }
+function Invoke-MRICopy {
+    param($Config,$Target,$Manifest,[string]$WorkPath,[scriptblock]$Guard,[string]$CancelPath)
+    $planPath=Join-Path $WorkPath 'copy-plan.json'
+    Write-MRIJson $planPath ([pscustomobject]@{SourceRoot=$Config.SourcePath;TargetRoot=$Target.Path;Manifest=$Manifest})
+    $arguments=@('-NoLogo','-NoProfile','-ExecutionPolicy','RemoteSigned','-File',(Join-Path $PSScriptRoot 'Copy-MRIFiles.ps1'),'-PlanPath',$planPath)
+    $command=($arguments | ForEach-Object { [MRIBatch.NativeProcess]::Quote([string]$_) }) -join ' '
+    return Invoke-MRICommand (Get-MRIWindowsExecutable 'WindowsPowerShell\v1.0\powershell.exe') $command $Config.SourcePath (Join-Path $WorkPath 'copy.log') $Config.CopyTimeoutSeconds $Guard -CancelPath $CancelPath
+}
 function Get-MRISetupArguments {
     param($Config, $Record, $Target)
     $expanded=@()
@@ -557,10 +565,8 @@ function Invoke-MRIBuild {
         if ($target.FreeBytes -lt ($SourceManifest.TotalBytes+256MB)) { throw 'Insufficient USB space; source files plus 256 MiB of headroom are required.' }
         if (@($SourceManifest.Entries | Where-Object { -not $_.IsDirectory -and $_.Length -gt 4294967295 }).Count) { throw 'A source file is larger than FAT32 permits.' }
         Set-MRIState $StatePath $Record 'COPYING' 'Copying to the pinned volume GUID, not a reusable drive letter.'
-        $copyArgs=@($Config.SourcePath,$target.Path,'/E','/COPY:DAT','/DCOPY:T','/IS','/IT','/XJ','/R:1','/W:1','/FFT','/J','/NP','/NFL','/NDL')
-        $command=($copyArgs | ForEach-Object { [MRIBatch.NativeProcess]::Quote([string]$_) }) -join ' '
-        $code=Invoke-MRICommand (Get-MRIWindowsExecutable 'robocopy.exe') $command $Config.SourcePath (Join-Path $WorkPath 'copy.log') $Config.CopyTimeoutSeconds $guard -CancelPath $CancelPath
-        if ($code -lt 0 -or $code -ge 8) { throw "Robocopy reported failure (exit $code)." }
+        $code=Invoke-MRICopy $Config $target $SourceManifest $WorkPath $guard $CancelPath
+        if ($code -ne 0) { throw "The copy worker reported failure (exit $code)." }
         Set-MRIState $StatePath $Record 'VERIFYING_COPY' 'Verifying every source file with SHA-256.'
         $copied=Get-MRIManifest $target.Path -IgnoreSystemDirectories -Guard $guard
         if (@($copied.Entries).Count -ne @($SourceManifest.Entries).Count) { throw 'Copied media contains paths absent from the source snapshot. Setup was not started.' }

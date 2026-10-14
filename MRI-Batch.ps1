@@ -221,10 +221,23 @@ function Watch-Media {
             } finally {
                 foreach ($info in @($jobs.Values)) {
                     Stop-Job -Job $info.Job -ErrorAction SilentlyContinue
-                    Remove-Job -Job $info.Job -Force -ErrorAction SilentlyContinue
-                    if ($info.LastStage -notin @('READY','ALREADY_READY','FAILED')) {
-                        try { Set-MRIState $info.StatePath $info.Record 'INTERRUPTED' 'Watcher stopped. This USB is not marked ready.' }
-                        catch { Write-Host "Could not save $($info.Record.Label)'s interrupted state: $($_.Exception.Message)" -ForegroundColor Red }
+                    try {
+                        $success=$false
+                        if ($info.Job.State -eq 'Completed') {
+                            $results=@(Receive-Job -Job $info.Job -ErrorAction Stop)
+                            $outcomes=@($results | Where-Object { $null -ne $_.PSObject.Properties['Success'] })
+                            $success=$outcomes.Count -eq 1 -and $outcomes[0].Success
+                        }
+                        Set-MRIOutcome $ready $failed $info.Record.Key $info.Record.Label $success
+                        if (-not $success) {
+                            $stage=$(if ([IO.File]::Exists($info.StatePath)) { (Read-MRIJson $info.StatePath).Stage } else { '' })
+                            if ($stage -ne 'FAILED') { Set-MRIState $info.StatePath $info.Record 'INTERRUPTED' 'Watcher stopped. This USB is not marked ready.' }
+                        }
+                    } catch {
+                        Set-MRIOutcome $ready $failed $info.Record.Key $info.Record.Label $false
+                        Write-Host "Could not finalize $($info.Record.Label)'s state: $($_.Exception.Message)" -ForegroundColor Red
+                    } finally {
+                        Remove-Job -Job $info.Job -Force -ErrorAction SilentlyContinue
                     }
                 }
             }

@@ -6,6 +6,7 @@
 - Make copying and verification independent of a setup batch. The menu no longer asks for `mri.bat`; advanced older batch recipes remain supported.
 - Reproduced and fixed cancellation reaching preparation on an unpartitioned drive. Recheck cancellation and actual storage-object identity before destructive operations, and bind partition creation to the checked object.
 - Validate required boot files before direct-copy erasure, reject fractional/string timing settings and negative copy exits, protect automation data disks, keep ready/failed totals mutually exclusive, and remove a newly written receipt if final completion checks fail.
+- Fixed a real Windows failure: Robocopy rejected the pinned volume GUID destination with error 53/exit 16. Copying now uses a contained Windows file-copy worker while keeping GUID-based writes, timeouts, cancellation, and final hashes.
 - Replace the flat source download with one clear top-level `START-MRI-DRIVE-MAKER.cmd` launcher, supporting code under `App/`, and historical files under `Developer/` as non-executable text.
 - Add source/archive/physical-object regressions, actual package launch testing, and a Windows smoke test using only owned temporary ISO/VHD fixtures. File verification is not proof of physical MRI booting or BDE-to-USB equivalence.
 

@@ -35,7 +35,7 @@ $baseConfig=Read-MRIJson (Join-Path $root 'mri-config.example.json'); $baseConfi
 $manifest=Get-MRIManifest $source
 $d=Drive
 $record=[pscustomobject]@{ Key=$d.Key; Serial=$d.Serial; PnpId=$d.PnpId; Model=$d.Model; Size=$d.Size; Label='MRI_01'; AllowErase=$true }
-$sim=[pscustomobject]@{ Inventory=@($d); Source=$source; TargetRoot=''; Letter='R'; CopyCode=1; SetupCode=0; CorruptCopy=$false
+$sim=[pscustomobject]@{ Inventory=@($d); Source=$source; TargetRoot=''; Letter='R'; CopyCode=0; SetupCode=0; CorruptCopy=$false
     NoPartitions=$false; CorruptSetup=$false; RemoveDuringCopy=$false; SetupCalls=0; CopyCalls=0; FormatCalls=0; FlushCalls=0; AddOutput=$false; FlushFails=$false; AddCopyExtra=$false }
 $module=Get-Module MRI.Batch
 & $module {
@@ -58,10 +58,9 @@ $module=Get-Module MRI.Batch
         Get-ChildItem -LiteralPath $script:Sim.TargetRoot -Force | Remove-Item -Recurse -Force
         return Get-MRITargetVolume (Assert-MRIDrive $Record $Config $ProtectedKeys $ExpectedNumber)
     }
-    function script:Invoke-MRICommand {
-        param($Executable,$Arguments,$WorkingDirectory,$LogPath,$TimeoutSeconds,$Guard,$Interactive=$false,$CancelPath='')
+    function script:Invoke-MRICopy {
+        param($Config,$Target,$Manifest,$WorkPath,$Guard,$CancelPath)
         & $Guard $true | Out-Null
-        if ($Executable -eq 'robocopy.exe') {
             $script:Sim.CopyCalls++
             Get-ChildItem -LiteralPath $script:Sim.Source -Force | Copy-Item -Destination $script:Sim.TargetRoot -Recurse -Force
             if ($script:Sim.AddCopyExtra) { [IO.File]::WriteAllText((Join-Path $script:Sim.TargetRoot 'unexpected.dat'),'unlisted fixture') }
@@ -69,7 +68,10 @@ $module=Get-Module MRI.Batch
             if ($script:Sim.RemoveDuringCopy) { $script:Sim.Inventory=@() }
             & $Guard $true | Out-Null
             return $script:Sim.CopyCode
-        }
+    }
+    function script:Invoke-MRICommand {
+        param($Executable,$Arguments,$WorkingDirectory,$LogPath,$TimeoutSeconds,$Guard,$Interactive=$false,$CancelPath='')
+        & $Guard $true | Out-Null
         $script:Sim.SetupCalls++
         if ($script:Sim.CorruptSetup) { [IO.File]::WriteAllText((Join-Path $script:Sim.TargetRoot 'payload.dat'),'changed by fixture setup') }
         if ($script:Sim.AddOutput) { [IO.File]::WriteAllText((Join-Path $script:Sim.TargetRoot 'created-by-setup.dat'),'fixture generated output') }
@@ -80,7 +82,7 @@ $module=Get-Module MRI.Batch
 function Reset-Case {
     $script:caseRoot=Join-Path $testRoot ([guid]::NewGuid().ToString('N'))
     $sim.TargetRoot=Join-Path $caseRoot 'Target'; [void][IO.Directory]::CreateDirectory($sim.TargetRoot)
-    $sim.Inventory=@(Drive); $sim.NoPartitions=$false; $sim.Letter='R'; $sim.CopyCode=1; $sim.SetupCode=0; $sim.CorruptCopy=$false
+    $sim.Inventory=@(Drive); $sim.NoPartitions=$false; $sim.Letter='R'; $sim.CopyCode=0; $sim.SetupCode=0; $sim.CorruptCopy=$false
     $sim.CorruptSetup=$false; $sim.RemoveDuringCopy=$false; $sim.SetupCalls=0; $sim.CopyCalls=0; $sim.FormatCalls=0
     $sim.FlushCalls=0; $sim.AddOutput=$false; $sim.FlushFails=$false; $sim.AddCopyExtra=$false
     $script:cfg=($baseConfig | ConvertTo-Json -Depth 6 | ConvertFrom-Json)

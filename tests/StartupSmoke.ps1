@@ -59,7 +59,7 @@ function Test-Startup {
     $results.Add([pscustomobject]@{Name=$Name; Passed=$passed; Error=$errorText; ElapsedSeconds=[Math]::Round($clock.Elapsed.TotalSeconds,3)})
 }
 try {
-    foreach ($name in @('MRI-Batch.ps1','MRI.Batch.psm1','NativeProcess.cs','mri-config.example.json','LICENSE')) {
+    foreach ($name in @('MRI-Batch.ps1','MRI.Batch.psm1','Copy-MRIFiles.ps1','NativeProcess.cs','mri-config.example.json','LICENSE')) {
         Copy-Item -LiteralPath (Join-Path $root $name) -Destination $app
     }
     foreach ($name in @('Start-MRI-Batch.cmd','MRI_CreatorV3.ps1','MRI_CreatorV4.ps1')) {

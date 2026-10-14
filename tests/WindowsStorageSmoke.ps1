@@ -100,7 +100,7 @@ public static class MRIStorageSmokeIsoWriter {
         $before=Get-MRIManifest $target.Path -IgnoreSystemDirectories
         Check (@($before.Entries).Count -eq 0)
     }
-    Test-Storage 'ISO-to-volume copy runs real robocopy, verification and volume flushing' {
+    Test-Storage 'ISO-to-volume copy runs the real copy worker, verification and volume flushing' {
         $result=Invoke-MRIBuild $record $runtime $manifest @() $state $receipt $work $cancel
         if (-not $result.Success) {
             $copyLog=Join-Path $work 'copy.log'

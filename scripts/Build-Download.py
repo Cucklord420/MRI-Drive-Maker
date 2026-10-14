@@ -27,7 +27,7 @@ def add(source, destination):
 
 for name in ('START-MRI-DRIVE-MAKER.cmd', 'READ-ME-FIRST.txt', 'LICENSE', 'NOTICE.md'):
     add(name, name)
-for name in ('MRI-Batch.ps1', 'MRI.Batch.psm1', 'NativeProcess.cs', 'mri-config.example.json', 'LICENSE'):
+for name in ('MRI-Batch.ps1', 'MRI.Batch.psm1', 'Copy-MRIFiles.ps1', 'NativeProcess.cs', 'mri-config.example.json', 'LICENSE'):
     add(name, 'App/' + name)
 for path in sorted((repo / 'tests').glob('*.ps1')):
     add(str(path.relative_to(repo)), 'App/tests/' + path.name)
