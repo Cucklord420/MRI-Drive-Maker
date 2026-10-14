@@ -102,7 +102,11 @@ public static class MRIStorageSmokeIsoWriter {
     }
     Test-Storage 'ISO-to-volume copy runs real robocopy, verification and volume flushing' {
         $result=Invoke-MRIBuild $record $runtime $manifest @() $state $receipt $work $cancel
-        if (-not $result.Success) { throw $result.Error }
+        if (-not $result.Success) {
+            $copyLog=Join-Path $work 'copy.log'
+            if ([IO.File]::Exists($copyLog)) { Write-Host ([IO.File]::ReadAllText($copyLog)) }
+            throw $result.Error
+        }
         Check ((Read-MRIJson $state).Stage -eq 'READY')
         Check ($null -eq (Read-MRIJson $receipt).SetupExit) 'Direct-copy mode must not run setup.'
         Assert-MRIManifest $manifest $target.Path
