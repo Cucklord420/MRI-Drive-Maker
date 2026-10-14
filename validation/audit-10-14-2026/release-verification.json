@@ -1,0 +1,33 @@
+{
+  "date": "10-14-2026",
+  "archive": "downloads/MRI-Drive-Maker-v0.2.0.zip",
+  "archive_sha256": "8ac3c7837beae57b754e7d8cf140427b30856a12479194633e83938b9da60ae9",
+  "bytes": 867827,
+  "archive_source_commit": "012b613f1758655e4eb4fadc3ce8350730364a22",
+  "tested_release_commit": "929b2460de118d4453bdc2d0d3aed535e8967723",
+  "windows_ci": "https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38511018611",
+  "windows_job": 115679296101,
+  "conclusion": "success",
+  "checks": {
+    "startup": 8,
+    "simulated_build": 56,
+    "source_and_storage_identity": 10,
+    "native_process": 2,
+    "owned_iso_vhd_storage": 8,
+    "actual_release_package": 2
+  },
+  "archive_checks": [
+    "Anonymous download SHA-256 matches published archive.",
+    "ZIP CRC is valid.",
+    "Every source file exactly matches its declared Git source commit.",
+    "Every manifest file hash matches.",
+    "Exactly one top-level launcher: START-MRI-DRIVE-MAKER.cmd.",
+    "Unchanged upstream GPL-3.0 license hash verified.",
+    "Portable Git bundle verified with complete upstream and modified source history."
+  ],
+  "limits": [
+    "No actual MRI/BDE-to-USB equivalence or physical firmware boot test.",
+    "Windows checks used Server 2025, PowerShell 5.1.26100.33438.",
+    "Only owned ISO/VHD fixtures used for storage testing; VHD USB classification mocked for the copy check."
+  ]
+}

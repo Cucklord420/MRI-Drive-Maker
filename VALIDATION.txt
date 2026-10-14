@@ -7,7 +7,12 @@ Windows-tested runtime revision: 3a5032754728a4067ef79437945102015ff53230
 CI: https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38510584392
 Evidence and runtime hashes: validation/audit-10-14-2026/results.json
 
-The final archive is checked separately after packaging the evidence.
+Final archive: 8ac3c7837beae57b754e7d8cf140427b30856a12479194633e83938b9da60ae9
+Final archive source commit: 012b613f1758655e4eb4fadc3ce8350730364a22
+Final package Windows CI passed: https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38511018611
+Final verification: validation/audit-10-14-2026/release-verification.json
+The exact ZIP passed its real Windows launcher and all file hash checks.
+Anonymous download, CRC, source against Git, unchanged license and Git bundle verified.
 The Windows storage check mounts a real test ISO, creates/formats only its own
 file-backed VHD, copies via native Unicode Windows file APIs into a volume GUID,
 verifies hashes, flushes the volume, checks reinsertion, and preserves unexpected files.
