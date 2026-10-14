@@ -19,6 +19,11 @@ independent modification; the upstream project was not changed.
 initialization and validation-runner startup, added entry-point regression
 checks and Windows CI, and refreshed the source download.
 
+**Modified 10-14-2026:** added direct ISO/ZIP input and verified copying
+without a setup batch, corrected cancellation and storage-object checks before
+preparation, clarified the single launcher, and added archive, package, and
+owned Windows ISO/VHD regression checks.
+
 This entire modified project is released under the **GNU General Public
 License, version 3 only** (`GPL-3.0-only`). Recipients may copy, modify, and
 redistribute it under that license. The full upstream license is preserved

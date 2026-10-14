@@ -1,5 +1,14 @@
 # Changes
 
+## 10-14-2026 — v0.2.0 ISO source and audit fixes
+
+- Accept an ISO directly, mount it read-only once per watcher, reuse existing mounts without ejecting them, and clean up owned mounts/caches after jobs stop. ZIPs containing media files or one ISO and extracted folders are supported.
+- Make copying and verification independent of a setup batch. The menu no longer asks for `mri.bat`; advanced older batch recipes remain supported.
+- Reproduced and fixed cancellation reaching preparation on an unpartitioned drive. Recheck cancellation and actual storage-object identity before destructive operations, and bind partition creation to the checked object.
+- Validate required boot files before direct-copy erasure, reject fractional/string timing settings and negative copy exits, protect automation data disks, keep ready/failed totals mutually exclusive, and remove a newly written receipt if final completion checks fail.
+- Replace the flat source download with one clear top-level `START-MRI-DRIVE-MAKER.cmd` launcher, supporting code under `App/`, and historical files under `Developer/` as non-executable text.
+- Add source/archive/physical-object regressions, actual package launch testing, and a Windows smoke test using only owned temporary ISO/VHD fixtures. File verification is not proof of physical MRI booting or BDE-to-USB equivalence.
+
 ## 10-13-2026 — v0.1.1 startup fix
 
 - Fixed the default configuration path when the launcher invokes an advanced script with `powershell.exe -File` on Windows PowerShell 5.1. Script-relative defaults now resolve after parameter binding.

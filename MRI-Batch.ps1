@@ -4,7 +4,8 @@
 [CmdletBinding()]
 param(
     [ValidateSet('Menu','Configure','Enroll','List','Watch','SelfTest')][string]$Action='Menu',
-    [string]$ConfigPath
+    [string]$ConfigPath,
+    [string]$DataPath
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
@@ -13,14 +14,16 @@ $ErrorActionPreference='Stop'
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
     $ConfigPath=Join-Path $PSScriptRoot 'mri-config.json'
 }
+$ConfigPath=[IO.Path]::GetFullPath($ConfigPath)
+if ([string]::IsNullOrWhiteSpace($DataPath)) { $DataPath=Join-Path $PSScriptRoot 'Data' }
+$DataPath=[IO.Path]::GetFullPath($DataPath)
 Import-Module (Join-Path $PSScriptRoot 'MRI.Batch.psm1') -Force -DisableNameChecking
-$DataPath=Join-Path $PSScriptRoot 'Data'
 $RegistryPath=Join-Path $DataPath 'drives.json'
 function Assert-WindowsAdmin {
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'Drive operations require Windows 10/11 and Windows PowerShell 5.1.' }
     $principal=[Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        throw 'Close this window, then right-click Start-MRI-Batch.cmd and choose Run as administrator.'
+        throw 'Close this window, then right-click START-MRI-DRIVE-MAKER.cmd and choose Run as administrator.'
     }
 }
 function Get-Config {
@@ -32,34 +35,39 @@ function Get-Records {
 }
 function Configure-Media {
     Assert-WindowsAdmin
-    Write-Host 'Choose the folder containing EXTRACTED current official MRI files.'
+    Write-Host '1 = select the official MRI ISO or ZIP (default).'
+    Write-Host '2 = select an already-extracted MRI folder.'
+    $choice=Read-Host 'Source [1]'
+    if ($choice -and $choice -notin @('1','2')) { throw 'Choose 1 or 2.' }
     Add-Type -AssemblyName System.Windows.Forms
-    $dialog=[Windows.Forms.FolderBrowserDialog]::new()
-    $dialog.Description='Select the extracted official MRI source folder'
+    if ($choice -eq '2') { $dialog=[Windows.Forms.FolderBrowserDialog]::new(); $dialog.Description='Select the extracted MRI boot-files folder' }
+    else { $dialog=[Windows.Forms.OpenFileDialog]::new(); $dialog.Title='Select the official MRI ISO or ZIP'; $dialog.Filter='MRI ISO or ZIP|*.iso;*.zip'; $dialog.CheckFileExists=$true }
     try {
         if ($dialog.ShowDialog() -ne [Windows.Forms.DialogResult]::OK) { return }
-        $source=$dialog.SelectedPath
+        $source=$(if ($choice -eq '2') { $dialog.SelectedPath } else { $dialog.FileName })
     } finally { $dialog.Dispose() }
     $cfg=Read-MRIJson (Join-Path $PSScriptRoot 'mri-config.example.json')
     $cfg.SourcePath=$source
-    Write-Host 'Select the batch that CREATES USB MEDIA. A batch that launches MRI diagnostics is a different operation.'
-    $batch=Read-Host 'Batch path relative to source folder [mri.bat]'
-    if ($batch) { $cfg.SetupBatch=$batch }
-    Write-Host 'Batch arguments: enter one argument at a time; blank ends. Normally there are none.'
-    Write-Host 'Supported placeholders: {DriveLetter}, {DriveRoot}, {DiskNumber}, {Label}.'
-    $arguments=@()
-    while ($true) { $arg=Read-Host 'Argument'; if (-not $arg) { break }; $arguments+=,$arg }
-    $cfg.SetupArguments=$arguments
-    $cfg.SetupInteractive=(Read-Host 'Does setup require visible prompts? [y/N]') -match '^y(es)?$'
+    $cfg.SourceKind=$(if ($choice -eq '2') { 'Folder' } else { [IO.Path]::GetExtension($source).TrimStart('.').ToUpperInvariant() })
+    Write-Host 'The selected image contents will be copied and verified. No batch file is required.'
     Write-Host '1 = copy to already-empty FAT32 drives (default).'
     Write-Host '2 = prepare MBR/FAT32; only drives individually enrolled for erasure can be erased.'
-    $cfg.PrepareDisk=(Read-Host 'Preparation mode [1]') -eq '2'
-    foreach ($rel in @('efi\boot\bootx64.efi','bootmgr')) {
-        if ([IO.File]::Exists((Join-MRIPath $source $rel))) { $cfg.RequiredFiles+=,$rel }
-    }
-    Assert-MRIConfig $cfg
-    Write-MRIJson $ConfigPath $cfg
-    Write-Host 'Configuration saved. Register the intended store USB drives, then start watching.'
+    $preparation=Read-Host 'Preparation mode [1]'
+    if ($preparation -and $preparation -notin @('1','2')) { throw 'Choose 1 or 2.' }
+    $cfg.PrepareDisk=$preparation -eq '2'
+    $opened=$null
+    try {
+        Write-Host 'Checking the source image and its UEFI boot files.'
+        $opened=Open-MRISource $cfg (Join-Path $DataPath 'Sources')
+        $probe=Get-MRIManifest $opened.Path -NoHash
+        foreach ($required in @($cfg.RequiredFiles)) {
+            if (-not @($probe.Entries | Where-Object { $_.RelativePath -eq $required -and -not $_.IsDirectory -and $_.Length -gt 0 }).Count) { throw "The source does not contain the required UEFI boot file: $required" }
+        }
+        if (@($probe.Entries | Where-Object { -not $_.IsDirectory -and $_.Length -gt 4294967295 }).Count) { throw 'A source file exceeds the FAT32 file-size limit. The USB was not touched.' }
+        Assert-MRIConfig $cfg
+        Write-MRIJson $ConfigPath $cfg
+    } finally { Close-MRISource $opened }
+    Write-Host 'Configuration saved. Register the intended USB drives once, then start watching.'
 }
 function Show-Drives {
     Assert-WindowsAdmin
@@ -76,7 +84,7 @@ function Enroll-Drives {
     Assert-WindowsAdmin
     $cfg=Get-Config
     $records=@(Get-Records); $inventory=@(Get-MRIInventory)
-    $protected=@(Get-MRIProtectedKeys @($cfg.SourcePath,$PSScriptRoot) $inventory)
+    $protected=@(Get-MRIProtectedKeys @($cfg.SourcePath,$PSScriptRoot,$DataPath) $inventory)
     Show-Drives
     Write-Host 'Select only the company MRI USB drives shown above. Unknown drives are never automatically enrolled.'
     $selection=Read-Host 'Disk numbers to register, separated by commas (blank cancels)'
@@ -118,12 +126,20 @@ function Watch-Media {
     if (-not $records.Count) { throw 'Register the intended MRI USB drives first.' }
     # A single machine-wide watcher avoids two independent copies racing the same USB.
     $mutex=[Threading.Mutex]::new($false,'Global\MRI_BATCH_CREATOR_V1')
-    $locked=$false; $jobs=@{}; $tracker=@{}; $seen=@{}; $ready=@{}; $failed=@{}
+    $locked=$false; $jobs=@{}; $tracker=@{}; $seen=@{}; $ready=@{}; $failed=@{}; $opened=$null
     $run=Join-Path $DataPath ('Runs\'+[guid]::NewGuid().ToString('N'))
     $cancel=Join-Path $run 'cancel'
     try {
         try { $locked=$mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $locked=$true }
         if (-not $locked) { throw 'Another MRI watcher is already running on this PC.' }
+        $inputPath=$cfg.SourcePath
+        $recipeIdentity=ConvertTo-Json -InputObject $cfg -Depth 6 -Compress
+        $opened=Open-MRISource $cfg (Join-Path $DataPath 'Sources')
+        $cfg.SourcePath=$opened.Path
+        $cfg | Add-Member -NotePropertyName SourceKind -NotePropertyValue Folder -Force
+        $cfg | Add-Member -NotePropertyName RecipeIdentity -NotePropertyValue $recipeIdentity -Force
+        $cfg | Add-Member -NotePropertyName InputStamp -NotePropertyValue $opened.Stamp -Force
+        Assert-MRIPlainDirectory $PSScriptRoot
         $source=[IO.Path]::GetFullPath($cfg.SourcePath).TrimEnd('\')+'\'
         $application=[IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\')+'\'
         if ($source.StartsWith($application,[StringComparison]::OrdinalIgnoreCase) -or $application.StartsWith($source,[StringComparison]::OrdinalIgnoreCase)) {
@@ -139,7 +155,7 @@ function Watch-Media {
         }
         $snapshot=Join-Path $run 'config.json'; $manifestPath=Join-Path $run 'source-manifest.json'
         Write-MRIJson $snapshot $cfg; Write-MRIJson $manifestPath $manifest
-        $protected=@(Get-MRIProtectedKeys @($cfg.SourcePath,$PSScriptRoot) @(Get-MRIInventory))
+        $protected=@(Get-MRIProtectedKeys @($inputPath,$PSScriptRoot,$DataPath) @(Get-MRIInventory))
         $module=Join-Path $PSScriptRoot 'MRI.Batch.psm1'
         Write-Host "Watching $($records.Count) registered USBs; maximum $($cfg.MaxParallel) builds at once."
         Write-Host 'Plug in registered drives. Press Q to stop. READY means verified; use Windows Safely Remove before unplugging.'
@@ -169,9 +185,9 @@ function Watch-Media {
                         $results=@(Receive-Job -Job $info.Job -ErrorAction Stop)
                         $outcomes=@($results | Where-Object { $null -ne $_.PSObject.Properties['Success'] })
                         if ($outcomes.Count -ne 1 -or -not $outcomes[0].Success) { throw 'Build did not return verified success. See the per-drive state/logs.' }
-                        $ready[$key]=$info.Record.Label; $failed.Remove($key)
+                        Set-MRIOutcome $ready $failed $key $info.Record.Label $true
                     } catch {
-                        $failed[$key]=$info.Record.Label
+                        Set-MRIOutcome $ready $failed $key $info.Record.Label $false
                         if ($info.LastStage -ne 'FAILED') { Set-MRIState $info.StatePath $info.Record 'FAILED' $_.Exception.Message; Write-Host "$($info.Record.Label): FAILED - $($_.Exception.Message)" -ForegroundColor Red }
                     } finally { Remove-Job -Job $info.Job -Force; $jobs.Remove($key) }
                     Write-Host "Verified: $($ready.Count)/$($records.Count) | Failed: $($failed.Count) | Active: $($jobs.Count)"
@@ -180,6 +196,7 @@ function Watch-Media {
             foreach ($record in $arrivals) {
                 if ($jobs.Count -ge $cfg.MaxParallel) { break }
                 if ($jobs.ContainsKey($record.Key)) { continue }
+                $ready.Remove($record.Key); $failed.Remove($record.Key)
                 $tracker[$record.Key].Attempted=$true
                 $work=Join-Path $run $record.Label; [void][IO.Directory]::CreateDirectory($work)
                 $statePath=Join-Path $work 'state.json'
@@ -197,14 +214,28 @@ function Watch-Media {
             Start-Sleep -Seconds $cfg.PollSeconds
         }
     } finally {
-        if ([IO.Directory]::Exists($run)) { [IO.File]::WriteAllText($cancel,'cancel') }
-        foreach ($info in @($jobs.Values)) {
-            Stop-Job -Job $info.Job -ErrorAction SilentlyContinue
-            Remove-Job -Job $info.Job -Force -ErrorAction SilentlyContinue
-            if ($info.LastStage -notin @('READY','ALREADY_READY','FAILED')) { Set-MRIState $info.StatePath $info.Record 'INTERRUPTED' 'Watcher stopped. This USB is not marked ready.' }
+        try {
+            try {
+                if ([IO.Directory]::Exists($run)) { [IO.File]::WriteAllText($cancel,'cancel') }
+                if ($jobs.Count) { $jobs.Values | ForEach-Object { $_.Job } | Wait-Job -Timeout 10 | Out-Null }
+            } finally {
+                foreach ($info in @($jobs.Values)) {
+                    Stop-Job -Job $info.Job -ErrorAction SilentlyContinue
+                    Remove-Job -Job $info.Job -Force -ErrorAction SilentlyContinue
+                    if ($info.LastStage -notin @('READY','ALREADY_READY','FAILED')) {
+                        try { Set-MRIState $info.StatePath $info.Record 'INTERRUPTED' 'Watcher stopped. This USB is not marked ready.' }
+                        catch { Write-Host "Could not save $($info.Record.Label)'s interrupted state: $($_.Exception.Message)" -ForegroundColor Red }
+                    }
+                }
+            }
         }
-        if ($locked) { $mutex.ReleaseMutex() }; $mutex.Dispose()
-        if ([IO.Directory]::Exists($run)) { Write-MRIJson (Join-Path $run 'summary.json') ([pscustomobject]@{ Verified=@($ready.Values); Failed=@($failed.Values); Registered=$records.Count }) }
+        finally {
+            try { Close-MRISource $opened }
+            finally {
+                if ($locked) { $mutex.ReleaseMutex() }; $mutex.Dispose()
+                if ([IO.Directory]::Exists($run)) { Write-MRIJson (Join-Path $run 'summary.json') ([pscustomobject]@{ Verified=@($ready.Values); Failed=@($failed.Values); Registered=$records.Count }) }
+            }
+        }
     }
 }
 try {
@@ -215,19 +246,19 @@ try {
             Write-Host 'Based on JStone21/MRI-Creation. Modifications (C) 2026 Cucklord420.'
             Write-Host 'GPL v3: you may copy, modify, and redistribute under LICENSE. No warranty.'
             Write-Host ("License: " + (Join-Path $PSScriptRoot 'LICENSE'))
-            Write-Host '1 Configure source and official setup batch'
+            Write-Host '1 Choose MRI ISO / ZIP / extracted folder'
             Write-Host '2 Register USB drives / enable erasure for selected drives'
             Write-Host '3 List connected USB drives'
             Write-Host '4 Watch and build'
             Write-Host 'Q Exit'
-            switch ((Read-Host 'Select')) {
+            try { switch ((Read-Host 'Select')) {
                 '1' { Configure-Media }
                 '2' { Enroll-Drives }
                 '3' { Show-Drives }
                 '4' { Watch-Media }
                 { $_ -match '^[Qq]$' } { exit 0 }
                 default { Write-Host 'Choose 1, 2, 3, 4, or Q.' }
-            }
+            } } catch { Write-Host $_.Exception.Message -ForegroundColor Red }
         }
     } else {
         switch ($Action) { Configure { Configure-Media }; Enroll { Enroll-Drives }; List { Show-Drives }; Watch { Watch-Media } }

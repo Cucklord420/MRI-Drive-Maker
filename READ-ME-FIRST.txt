@@ -1,0 +1,26 @@
+OPEN THIS FILE TO RUN THE TOOL:
+START-MRI-DRIVE-MAKER.cmd
+
+Right-click it and choose Run as administrator.
+
+1. Choose 1 in the menu and select your official MRI .iso file.
+   A .zip archive or an already-extracted folder is also supported.
+   The ISO is opened read-only. You do not need to run a batch file.
+2. Choose copy mode for empty FAT32 drives, or prepare mode to format
+   individually registered MRI drives as MBR/FAT32.
+3. Choose 2 to register the intended physical USB drives once.
+   Check their hardware serials. Prepare mode requires ERASE confirmation.
+4. Choose 4 to watch. Plug in registered drives; verified drives show READY.
+   Use Windows Safely Remove before unplugging. Q stops the watcher.
+
+App contains the editable program source and tests.
+Developer contains historical source and validation records.
+You only need to open START-MRI-DRIVE-MAKER.cmd.
+
+This is an independent open-source media builder, not the official
+BDE-to-USB utility. Exact BDE-to-USB equivalence and physical MRI booting
+have not been verified. Use only an authorized current source image.
+
+No proprietary MRI files or BDE-to-USB program are included.
+LICENSE contains the unchanged GPL version 3 license.
+Software fees: $0. Hardware and staff costs vary.

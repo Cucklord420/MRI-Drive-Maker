@@ -31,18 +31,18 @@ $source=Join-Path $testRoot 'Source'; [void][IO.Directory]::CreateDirectory((Joi
 [IO.File]::WriteAllText((Join-Path $source 'mri.bat'),'@echo off'+[Environment]::NewLine+'exit /b 0')
 [IO.File]::WriteAllText((Join-Path $source 'payload.dat'),'sample approved fixture payload')
 [IO.File]::WriteAllText((Join-Path $source 'efi/boot/bootx64.efi'),'fixture boot file')
-$baseConfig=Read-MRIJson (Join-Path $root 'mri-config.example.json'); $baseConfig.SourcePath=$source
+$baseConfig=Read-MRIJson (Join-Path $root 'mri-config.example.json'); $baseConfig.SourcePath=$source; $baseConfig.SetupBatch='mri.bat'
 $manifest=Get-MRIManifest $source
 $d=Drive
 $record=[pscustomobject]@{ Key=$d.Key; Serial=$d.Serial; PnpId=$d.PnpId; Model=$d.Model; Size=$d.Size; Label='MRI_01'; AllowErase=$true }
 $sim=[pscustomobject]@{ Inventory=@($d); Source=$source; TargetRoot=''; Letter='R'; CopyCode=1; SetupCode=0; CorruptCopy=$false
-    CorruptSetup=$false; RemoveDuringCopy=$false; SetupCalls=0; CopyCalls=0; FormatCalls=0; FlushCalls=0; AddOutput=$false; FlushFails=$false; AddCopyExtra=$false }
+    NoPartitions=$false; CorruptSetup=$false; RemoveDuringCopy=$false; SetupCalls=0; CopyCalls=0; FormatCalls=0; FlushCalls=0; AddOutput=$false; FlushFails=$false; AddCopyExtra=$false }
 $module=Get-Module MRI.Batch
 & $module {
     param($sim)
     $script:Sim=$sim
     function script:Get-MRIInventory { $script:Sim.Inventory }
-    function script:Get-Partition { param($DiskNumber); [pscustomobject]@{DiskNumber=$DiskNumber; PartitionNumber=1; IsBoot=$false; IsSystem=$false} }
+    function script:Get-Partition { param($DiskNumber); if ($script:Sim.NoPartitions) { return }; [pscustomobject]@{DiskNumber=$DiskNumber; PartitionNumber=1; IsBoot=$false; IsSystem=$false} }
     function script:Get-MRITargetVolume {
         param($Drive)
         [pscustomobject]@{Path=$script:Sim.TargetRoot; Letter=$script:Sim.Letter; Number=$Drive.Number; PartitionNumber=1; FileSystem='FAT32'; FreeBytes=[long]30000000000}
@@ -50,7 +50,8 @@ $module=Get-Module MRI.Batch
     function script:Get-MRIWindowsExecutable { param($Name); return $Name }
     function script:Flush-MRIVolume { param($Path); $script:Sim.FlushCalls++; if ($script:Sim.FlushFails) { throw 'Flush failed.' } }
     function script:Initialize-MRITarget {
-        param($Record,$Config,$ProtectedKeys,$ExpectedNumber)
+        param($Record,$Config,$ProtectedKeys,$ExpectedNumber,$CancelPath='')
+        Assert-MRINotCancelled $CancelPath
         if (-not $Record.AllowErase) { throw 'This drive was not individually enrolled for automatic erasure.' }
         [void](Assert-MRIDrive $Record $Config $ProtectedKeys $ExpectedNumber)
         $script:Sim.FormatCalls++
@@ -79,7 +80,7 @@ $module=Get-Module MRI.Batch
 function Reset-Case {
     $script:caseRoot=Join-Path $testRoot ([guid]::NewGuid().ToString('N'))
     $sim.TargetRoot=Join-Path $caseRoot 'Target'; [void][IO.Directory]::CreateDirectory($sim.TargetRoot)
-    $sim.Inventory=@(Drive); $sim.Letter='R'; $sim.CopyCode=1; $sim.SetupCode=0; $sim.CorruptCopy=$false
+    $sim.Inventory=@(Drive); $sim.NoPartitions=$false; $sim.Letter='R'; $sim.CopyCode=1; $sim.SetupCode=0; $sim.CorruptCopy=$false
     $sim.CorruptSetup=$false; $sim.RemoveDuringCopy=$false; $sim.SetupCalls=0; $sim.CopyCalls=0; $sim.FormatCalls=0
     $sim.FlushCalls=0; $sim.AddOutput=$false; $sim.FlushFails=$false; $sim.AddCopyExtra=$false
     $script:cfg=($baseConfig | ConvertTo-Json -Depth 6 | ConvertFrom-Json)
@@ -110,7 +111,7 @@ try {
     Test 'Boot and system drives are protected' { Reset-Case; $a=Drive; $a.IsBoot=$true; Check ([bool](Get-MRIDriveBlockReason $a @($a) $cfg)); $a.IsBoot=$false; $a.IsSystem=$true; Check ([bool](Get-MRIDriveBlockReason $a @($a) $cfg)) }
     Test 'Read-only and offline drives are protected' { Reset-Case; $a=Drive; $a.IsReadOnly=$true; Check ([bool](Get-MRIDriveBlockReason $a @($a) $cfg)); $a.IsReadOnly=$false; $a.IsOffline=$true; Check ([bool](Get-MRIDriveBlockReason $a @($a) $cfg)) }
     Test 'Source and tool disks are protected' { Reset-Case; Check ([bool](Get-MRIDriveBlockReason $d @($d) $cfg @($d.Key))) }
-    Test 'Wrong capacity is rejected' { Reset-Case; $a=Drive; $a.Size=1000000000000; Check ([bool](Get-MRIDriveBlockReason $a @($a) $cfg)) }
+    Test 'Wrong capacity is rejected' { Reset-Case; $cfg.MaximumDiskBytes=64000000000; $a=Drive; $a.Size=1000000000000; Check ([bool](Get-MRIDriveBlockReason $a @($a) $cfg)) }
     Test 'Duplicate attached serials are rejected' { Reset-Case; $b=Drive 'STORE-A' 7 'OTHER-PNP'; Check ([bool](Get-MRIDriveBlockReason $d @($d,$b) $cfg)) }
     Test 'Duplicate serial in registry is rejected' {
         $r=($record | ConvertTo-Json | ConvertFrom-Json); $r.PnpId='OTHER-PNP'; $r.Key=Get-MRIDriveKey $r.Serial $r.PnpId $r.Model $r.Size; $r.Label='MRI_02'
@@ -178,6 +179,45 @@ try {
     Test 'Removal of a source USB prevents a build' {
         Reset-Case; $r=Build @('SOURCE-USB-NO-LONGER-PRESENT')
         Check (-not $r.Success); Check ($sim.CopyCalls -eq 0 -and $sim.FormatCalls -eq 0)
+    }
+    Test 'Direct copy works without a setup batch' {
+        Reset-Case; $cfg.SetupBatch=''; $cfg.SetupArguments=@()
+        $r=Build; Check $r.Success; Check ($sim.SetupCalls -eq 0 -and $sim.CopyCalls -eq 1)
+    }
+    Test 'Cancellation before a raw-drive build prevents formatting' {
+        Reset-Case; $cfg.PrepareDisk=$true; $sim.NoPartitions=$true
+        [IO.File]::WriteAllText($cancel,'cancel')
+        $r=Build; Check (-not $r.Success); Check ($sim.FormatCalls -eq 0 -and $sim.CopyCalls -eq 0) 'Cancelled raw drive was formatted.'
+    }
+    Test 'Missing source boot files block direct-copy preparation before erasure' {
+        Reset-Case; $cfg.SetupBatch=''; $cfg.PrepareDisk=$true; $cfg.RequiredFiles=@('missing-efi.bin')
+        $r=Build; Check (-not $r.Success); Check ($sim.FormatCalls -eq 0 -and $sim.CopyCalls -eq 0)
+    }
+    Test 'Direct-copy mode rejects mutable-file and setup-argument exceptions' {
+        Reset-Case; $cfg.SetupBatch=''; $cfg.MutableFiles=@('payload.dat'); Throws { Assert-MRIConfig $cfg } 'Direct-copy'
+        $cfg.MutableFiles=@(); $cfg.SetupArguments=@('unexpected'); Throws { Assert-MRIConfig $cfg } 'Direct-copy'
+    }
+    Test 'Fractional and string timing/concurrency values are rejected' {
+        foreach ($value in @(1.5,'2',$true)) { Reset-Case; $cfg.MaxParallel=$value; Throws { Assert-MRIConfig $cfg } 'integer' }
+    }
+    Test 'Negative copy exit cannot create a ready receipt' {
+        Reset-Case; $sim.CopyCode=-1; $r=Build; Check (-not $r.Success); Check (-not [IO.File]::Exists($receipt))
+    }
+    Test 'Ready and failed totals remain mutually exclusive for a drive' {
+        $ready=@{}; $failed=@{}
+        Set-MRIOutcome $ready $failed 'A' 'MRI_01' $true
+        Set-MRIOutcome $ready $failed 'A' 'MRI_01' $false
+        Check ($ready.Count -eq 0 -and $failed.Count -eq 1)
+        Set-MRIOutcome $ready $failed 'A' 'MRI_01' $true
+        Check ($ready.Count -eq 1 -and $failed.Count -eq 0)
+    }
+    Test 'A source archive changing during a session is rejected' {
+        Reset-Case; $p=Join-Path $caseRoot 'source.iso'; [IO.File]::WriteAllText($p,'fixture image')
+        $f=Get-Item -LiteralPath $p
+        $cfg | Add-Member -NotePropertyName InputStamp -NotePropertyValue ([pscustomobject]@{Path=$p;Length=$f.Length;WriteTicks=$f.LastWriteTimeUtc.Ticks})
+        Assert-MRIInputSource $cfg
+        [IO.File]::AppendAllText($p,'changed')
+        Throws { Assert-MRIInputSource $cfg } 'changed'
     }
     Write-Host "`n$($count-$failures.Count)/$count tests passed. All storage/process APIs in build tests were simulated."
     if ($failures.Count) { $failures | ForEach-Object { Write-Host $_ }; exit 1 }

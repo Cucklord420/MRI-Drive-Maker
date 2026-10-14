@@ -59,9 +59,11 @@ function Test-Startup {
     $results.Add([pscustomobject]@{Name=$Name; Passed=$passed; Error=$errorText; ElapsedSeconds=[Math]::Round($clock.Elapsed.TotalSeconds,3)})
 }
 try {
-    foreach ($name in @('MRI-Batch.ps1','MRI.Batch.psm1','NativeProcess.cs','Start-MRI-Batch.cmd',
-        'MRI_CreatorV3.ps1','MRI_CreatorV4.ps1','mri-config.example.json','LICENSE')) {
+    foreach ($name in @('MRI-Batch.ps1','MRI.Batch.psm1','NativeProcess.cs','mri-config.example.json','LICENSE')) {
         Copy-Item -LiteralPath (Join-Path $root $name) -Destination $app
+    }
+    foreach ($name in @('Start-MRI-Batch.cmd','MRI_CreatorV3.ps1','MRI_CreatorV4.ps1')) {
+        if ([IO.File]::Exists((Join-Path $root $name))) { Copy-Item -LiteralPath (Join-Path $root $name) -Destination $app }
     }
     Copy-Item -LiteralPath (Join-Path $root 'tests') -Destination $app -Recurse
     # Console input is a host capability, not part of the path regression.
@@ -83,6 +85,7 @@ Export-ModuleMember -Function '*-MRI*','Initialize-MRINative','Read-Host'
         Check-Menu (Invoke-Script $entry @('-ConfigPath','') "Q`n")
     }
     foreach ($entryName in @('MRI_CreatorV3.ps1','MRI_CreatorV4.ps1')) {
+        if (-not [IO.File]::Exists((Join-Path $app $entryName))) { continue }
         Test-Startup "Legacy $entryName launches the current menu" {
             Check-Menu (Invoke-Script (Join-Path $app $entryName) -InputText "Q`n")
         }
@@ -104,7 +107,7 @@ Export-ModuleMember -Function '*-MRI*','Initialize-MRINative','Read-Host'
             throw 'Validation report did not record a successful suite.'
         }
     }
-    if ($windows) {
+    if ($windows -and [IO.File]::Exists((Join-Path $app 'Start-MRI-Batch.cmd'))) {
         Test-Startup 'Start-MRI-Batch.cmd launches Windows PowerShell 5.1 from a folder with spaces and ampersand' {
             $cmd=Join-Path $env:SystemRoot 'System32/cmd.exe'
             $argsLine='/d /s /c ""'+(Join-Path $app 'Start-MRI-Batch.cmd')+'""'
@@ -116,7 +119,7 @@ Export-ModuleMember -Function '*-MRI*','Initialize-MRINative','Read-Host'
     }
     $failed=@($results | Where-Object { -not $_.Passed }).Count
     $summary=[ordered]@{
-        Date='10-13-2026'; PowerShellVersion=$PSVersionTable.PSVersion.ToString()
+        Date=(Get-Date).ToString('MM-dd-yyyy'); PowerShellVersion=$PSVersionTable.PSVersion.ToString()
         Platform=[Environment]::OSVersion.Platform.ToString(); Passed=$results.Count-$failed; Failed=$failed
         Tests=$results.ToArray(); Scope='Real entry points with menu input mocked in the temporary copy, mocked build suite, validation runner; no USB or MRI payload access.'
     }
