@@ -7,7 +7,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $root 'MRI.Batch.psm1') -Force -DisableNameChecking
-if (-not $ArchivePath) { $ArchivePath=Join-Path $root 'downloads/MRI-Drive-Maker-v0.2.0.zip' }
+if (-not $ArchivePath) { $ArchivePath=Join-Path $root 'downloads/MRI-Drive-Maker-v0.3.0.zip' }
 $temp=Join-Path ([IO.Path]::GetTempPath()) ('mri-package-'+[guid]::NewGuid().ToString('N'))
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 try {
@@ -38,7 +38,7 @@ try {
             $process.StandardInput.Close()
             if (-not $process.WaitForExit(30000)) { & (Join-Path $env:SystemRoot 'System32/taskkill.exe') /PID $process.Id /T /F | Out-Null; throw 'Packaged launcher timed out.' }
             $output=$stdout.GetAwaiter().GetResult()+$stderr.GetAwaiter().GetResult()
-            if ($process.ExitCode -ne 0 -or -not $output.Contains('Choose MRI ISO')) { throw "Packaged launcher failed: $output" }
+            if ($process.ExitCode -ne 0 -or -not $output.Contains('Choose MRI ISO') -or -not $output.Contains('Set simultaneous builds')) { throw "Packaged launcher failed: $output" }
             Write-Host 'PASS The actual packaged top-level launcher opens the ISO menu on Windows PowerShell 5.1.'
         } finally { $process.Dispose() }
     }

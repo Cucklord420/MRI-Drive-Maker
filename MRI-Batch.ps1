@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 # SPDX-License-Identifier: GPL-3.0-only
-# GPL-3.0-only. Continuous MRI media builder, updated 10-13-2026.
+# GPL-3.0-only. Continuous MRI media builder, updated 10-14-2026.
 [CmdletBinding()]
 param(
     [ValidateSet('Menu','Configure','Enroll','List','Watch','SelfTest')][string]$Action='Menu',
@@ -33,6 +33,22 @@ function Get-Records {
     if (-not [IO.File]::Exists($RegistryPath)) { return }
     $records=@(Read-MRIJson $RegistryPath); Assert-MRIRegistry $records; return $records
 }
+function Read-ParallelLimit {
+    param([int]$Default)
+    Write-Host 'Several USBs can copy and verify at once. Shared USB ports/hubs still share bandwidth.'
+    $inputText=Read-Host "Simultaneous builds, 1-30 [$Default]"
+    if ([string]::IsNullOrWhiteSpace($inputText)) { return $Default }
+    $limit=0
+    if (-not [int]::TryParse($inputText,[ref]$limit) -or $limit -lt 1 -or $limit -gt 30) { throw 'Choose a whole number from 1 through 30.' }
+    return $limit
+}
+function Set-ParallelLimit {
+    Assert-WindowsAdmin
+    $cfg=Get-Config
+    $cfg.MaxParallel=Read-ParallelLimit $cfg.MaxParallel
+    Write-MRIJson $ConfigPath $cfg
+    Write-Host "Saved: up to $($cfg.MaxParallel) simultaneous builds in the next watcher session."
+}
 function Configure-Media {
     Assert-WindowsAdmin
     Write-Host '1 = select the official MRI ISO or ZIP (default).'
@@ -55,13 +71,15 @@ function Configure-Media {
     $preparation=Read-Host 'Preparation mode [1]'
     if ($preparation -and $preparation -notin @('1','2')) { throw 'Choose 1 or 2.' }
     $cfg.PrepareDisk=$preparation -eq '2'
+    $cfg.MaxParallel=Read-ParallelLimit $cfg.MaxParallel
     $opened=$null
     try {
-        Write-Host 'Checking the source image and its UEFI boot files.'
+        Write-Host 'Checking the source contents and FAT32 limits.'
         $opened=Open-MRISource $cfg (Join-Path $DataPath 'Sources')
         $probe=Get-MRIManifest $opened.Path -NoHash
+        if (-not @($probe.Entries | Where-Object { -not $_.IsDirectory }).Count) { throw 'The source contains no files.' }
         foreach ($required in @($cfg.RequiredFiles)) {
-            if (-not @($probe.Entries | Where-Object { $_.RelativePath -eq $required -and -not $_.IsDirectory -and $_.Length -gt 0 }).Count) { throw "The source does not contain the required UEFI boot file: $required" }
+            if (-not @($probe.Entries | Where-Object { $_.RelativePath -eq $required -and -not $_.IsDirectory -and $_.Length -gt 0 }).Count) { throw "The source does not contain the configured required file: $required" }
         }
         if (@($probe.Entries | Where-Object { -not $_.IsDirectory -and $_.Length -gt 4294967295 }).Count) { throw 'A source file exceeds the FAT32 file-size limit. The USB was not touched.' }
         Assert-MRIConfig $cfg
@@ -154,12 +172,14 @@ function Watch-Media {
             if (-not @($manifest.Entries | Where-Object { $_.RelativePath -eq $mutable -and -not $_.IsDirectory }).Count) { throw "MutableFiles entry is not a source file: $mutable" }
         }
         $snapshot=Join-Path $run 'config.json'; $manifestPath=Join-Path $run 'source-manifest.json'
-        Write-MRIJson $snapshot $cfg; Write-MRIJson $manifestPath $manifest
+        $configHash=Write-MRIJson $snapshot $cfg -PassThruHash
+        $manifestHash=Write-MRIJson $manifestPath $manifest -PassThruHash
         $protected=@(Get-MRIProtectedKeys @($inputPath,$PSScriptRoot,$DataPath) @(Get-MRIInventory))
         $module=Join-Path $PSScriptRoot 'MRI.Batch.psm1'
         Write-Host "Watching $($records.Count) registered USBs; maximum $($cfg.MaxParallel) builds at once."
         Write-Host 'Plug in registered drives. Press Q to stop. READY means verified; use Windows Safely Remove before unplugging.'
         Write-Host "Session reports: $run"
+        $statusClock=[Diagnostics.Stopwatch]::StartNew()
         while ($true) {
             try { if ([Console]::KeyAvailable -and [Console]::ReadKey($true).Key -eq [ConsoleKey]::Q) { break } } catch { }
             $inventory=@(Get-MRIInventory)
@@ -193,23 +213,20 @@ function Watch-Media {
                     Write-Host "Verified: $($ready.Count)/$($records.Count) | Failed: $($failed.Count) | Active: $($jobs.Count)"
                 }
             }
-            foreach ($record in $arrivals) {
-                if ($jobs.Count -ge $cfg.MaxParallel) { break }
-                if ($jobs.ContainsKey($record.Key)) { continue }
+            foreach ($record in @(Select-MRIBuilds $arrivals $jobs $cfg.MaxParallel)) {
                 $ready.Remove($record.Key); $failed.Remove($record.Key)
                 $tracker[$record.Key].Attempted=$true
                 $work=Join-Path $run $record.Label; [void][IO.Directory]::CreateDirectory($work)
                 $statePath=Join-Path $work 'state.json'
                 $receiptPath=Join-Path $DataPath ('Receipts\'+$record.Key+'.json')
-                $job=Start-Job -ScriptBlock {
-                    param($module,$record,$snapshot,$manifestPath,$protected,$statePath,$receiptPath,$work,$cancel)
-                    $ErrorActionPreference='Stop'
-                    Import-Module $module -Force -DisableNameChecking
-                    $config=Read-MRIJson $snapshot; $manifest=Read-MRIJson $manifestPath
-                    Invoke-MRIBuild $record $config $manifest @($protected) $statePath $receiptPath $work $cancel
-                } -ArgumentList $module,$record,$snapshot,$manifestPath,$protected,$statePath,$receiptPath,$work,$cancel
+                $job=Start-MRIBuildJob $module $record $snapshot $configHash $manifestPath $manifestHash $protected $statePath $receiptPath $work $cancel
                 $jobs[$record.Key]=[pscustomobject]@{ Job=$job; Record=$record; StatePath=$statePath; LastStage='' }
                 Write-Host "$($record.Label): detected; build queued."
+            }
+            if ($statusClock.Elapsed.TotalSeconds -ge 10) {
+                $waiting=@($arrivals | Where-Object { -not $jobs.ContainsKey($_.Key) -and -not $tracker[$_.Key].Attempted }).Count
+                Write-Host "Active: $($jobs.Count)/$($cfg.MaxParallel) | Waiting: $waiting | Verified: $($ready.Count)/$($records.Count) | Failed: $($failed.Count)"
+                $statusClock.Restart()
             }
             Start-Sleep -Seconds $cfg.PollSeconds
         }
@@ -263,14 +280,16 @@ try {
             Write-Host '2 Register USB drives / enable erasure for selected drives'
             Write-Host '3 List connected USB drives'
             Write-Host '4 Watch and build'
+            Write-Host '5 Set simultaneous builds (1-30)'
             Write-Host 'Q Exit'
             try { switch ((Read-Host 'Select')) {
                 '1' { Configure-Media }
                 '2' { Enroll-Drives }
                 '3' { Show-Drives }
                 '4' { Watch-Media }
+                '5' { Set-ParallelLimit }
                 { $_ -match '^[Qq]$' } { exit 0 }
-                default { Write-Host 'Choose 1, 2, 3, 4, or Q.' }
+                default { Write-Host 'Choose 1, 2, 3, 4, 5, or Q.' }
             } } catch { Write-Host $_.Exception.Message -ForegroundColor Red }
         }
     } else {

@@ -8,10 +8,20 @@ Right-click it and choose Run as administrator.
    The ISO is opened read-only. You do not need to run a batch file.
 2. Choose copy mode for empty FAT32 drives, or prepare mode to format
    individually registered MRI drives as MBR/FAT32.
+   For the clean / FAT32 / copy-to-root workflow, select prepare mode.
+   New configurations allow four simultaneous builds; select 1-30 when asked.
 3. Choose 2 to register the intended physical USB drives once.
    Check their hardware serials. Prepare mode requires ERASE confirmation.
 4. Choose 4 to watch. Plug in registered drives; verified drives show READY.
    Use Windows Safely Remove before unplugging. Q stops the watcher.
+5. Menu option 5 changes the simultaneous-build limit for the next session.
+   Existing settings are preserved; use option 5 to change an old limit.
+
+Source contents go to each USB's root, not a new wrapper folder.
+Direct copying works without drive letters. Each finished USB gets full
+SHA-256 verification after writes are flushed. Shared hubs share bandwidth;
+the 1-30 limit is capacity, not a measured speedup.
+Unexpected files still block automatic erasure, even on a registered drive.
 
 App contains the editable program source and tests.
 Developer contains historical source and validation records.

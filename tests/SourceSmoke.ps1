@@ -61,6 +61,32 @@ try {
         $bad=($cfg | ConvertTo-Json | ConvertFrom-Json); $bad.SourceKind='Unknown'
         $caught=$false; try { Assert-MRIConfig $bad } catch { $caught=$true }; Check $caught
     }
+    Test-Source 'Windows device aliases in source archives are rejected before files are extracted' {
+        foreach ($name in @('NUL','efi/CON.txt','PRN.log','COM1.dat','LPT9','AUX')) {
+            $zip=Join-Path $temp ([guid]::NewGuid().ToString('N')+'.zip'); Make-Zip $zip @('normal.txt',$name)
+            $destination=Join-Path $temp ([guid]::NewGuid().ToString('N'))
+            $caught=$false; try { Expand-MRIArchive $zip $destination } catch { $caught=$true }; Check $caught
+            Check (-not [IO.File]::Exists((Join-Path $destination 'normal.txt')))
+        }
+    }
+    Test-Source 'Authenticated runtime data detects tampering before it can be used' {
+        $path=Join-Path $temp 'plan.json'
+        $hash=Write-MRIJson $path ([pscustomobject]@{TargetRoot='selected-volume';PrepareDisk=$false}) -PassThruHash
+        Check ((Read-MRIAuthenticatedJson $path $hash).TargetRoot -eq 'selected-volume')
+        [IO.File]::WriteAllText($path,'{"TargetRoot":"system-volume","PrepareDisk":true}')
+        $caught=$false; try { Read-MRIAuthenticatedJson $path $hash | Out-Null } catch { $caught=$_.Exception.Message -match 'changed or is corrupt' }; Check $caught
+    }
+    Test-Source 'Chunked SHA-256 matches the standard result and checks cancellation inside a large file' {
+        $path=Join-Path $temp 'large.bin'; $bytes=New-Object byte[] (4MB)
+        for ($i=0; $i -lt $bytes.Length; $i+=4096) { $bytes[$i]=[byte](($i/4096)%251) }
+        [IO.File]::WriteAllBytes($path,$bytes)
+        Check ((Get-MRIFileHash $path) -eq (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash)
+        $counter=[pscustomobject]@{Calls=0}; $caught=$false
+        try { Get-MRIFileHash $path -Guard { $counter.Calls++; if ($counter.Calls -eq 2) { throw 'fixture cancellation' } } | Out-Null }
+        catch { $caught=$_.Exception.Message -match 'fixture cancellation' }
+        Check $caught; Check ($counter.Calls -eq 2)
+        $handle=[IO.File]::Open($path,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None); $handle.Dispose()
+    }
     Test-Source 'A cancelled storage-object query cannot reach disk APIs' {
         $cancel=Join-Path $temp 'cancel'; [IO.File]::WriteAllText($cancel,'cancel')
         $caught=$false; try { Get-MRIWritableDisk $null $null @() 0 $cancel | Out-Null } catch { $caught=$_.Exception.Message -match 'cancelled' }; Check $caught

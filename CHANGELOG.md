@@ -1,5 +1,15 @@
 # Changes
 
+## 10-14-2026 — v0.3.0 parallel USB preparation and copy checks
+
+- Add a visible 1–30 simultaneous-build setting, default four for new configurations, and active/waiting totals. Preserve existing settings and keep optional legacy setup serialized by default.
+- Support direct copy/preparation with volume GUIDs and no drive letters. Source contents still go directly to each FAT32 root.
+- Remove the redundant direct-copy hash pass: flush, then verify every target file once with SHA-256 and exact path matching. Keep pre-batch and final hashing for legacy batch recipes.
+- Make hashing cancellable between chunks; authenticate runtime config/manifest/copy-plan data with hashes calculated before writing and a single authenticated read.
+- Reject Windows device aliases and unexpected final extra files in direct mode. Retain physical identity, source/system exclusions, unknown-content protection and per-drive erase consent.
+- Exclude operational settings from media recipes and safely migrate matching old direct-copy receipts. Required filenames are optional; empty sources remain blocked before preparation.
+- Add 30-drive queue/security regressions and four owned-VHD Windows builds covering concurrent preparation/copying, letter-free targets, process overlap and verification. No physical USB/MRI boot or throughput claim is made.
+
 ## 10-14-2026 — v0.2.0 ISO source and audit fixes
 
 - Accept an ISO directly, mount it read-only once per watcher, reuse existing mounts without ejecting them, and clean up owned mounts/caches after jobs stop. ZIPs containing media files or one ISO and extracted folders are supported.

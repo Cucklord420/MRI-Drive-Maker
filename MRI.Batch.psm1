@@ -1,19 +1,29 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# GPL-3.0-only. Updated 10-13-2026 for ISO input and audited drive guards.
+# GPL-3.0-only. Updated 10-14-2026 for concurrency and security checks.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 function Write-MRIJson {
-    param([string]$Path, $Value)
+    param([string]$Path, $Value, [switch]$PassThruHash)
     $Path=[IO.Path]::GetFullPath($Path)
     $parent = [IO.Path]::GetDirectoryName($Path)
     [void][IO.Directory]::CreateDirectory($parent)
     $tmp = $Path + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
+    $json=ConvertTo-Json -InputObject $Value -Depth 30
     try {
-        [IO.File]::WriteAllText($tmp, (ConvertTo-Json -InputObject $Value -Depth 30), [Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText($tmp, $json, [Text.UTF8Encoding]::new($false))
         if ([IO.File]::Exists($Path)) { [IO.File]::Replace($tmp, $Path, [System.Management.Automation.Language.NullString]::Value) }
         else { [IO.File]::Move($tmp, $Path) }
     } finally { if ([IO.File]::Exists($tmp)) { [IO.File]::Delete($tmp) } }
+    if ($PassThruHash) { return Get-MRIHash $json }
+}
+function Read-MRIAuthenticatedJson {
+    param([string]$Path,[string]$ExpectedHash)
+    if ($ExpectedHash -notmatch '^[A-Fa-f0-9]{64}$') { throw 'Missing or invalid expected data hash.' }
+    # Read once: hashing then reopening the path would permit a replacement race.
+    $json=[IO.File]::ReadAllText($Path)
+    if ((Get-MRIHash $json) -ne $ExpectedHash) { throw 'Runtime data changed or is corrupt. No copy or preparation is allowed.' }
+    return ($json | ConvertFrom-Json)
 }
 function Read-MRIJson {
     param([string]$Path)
@@ -35,6 +45,9 @@ function ConvertTo-MRIRelativePath {
     $parts = $p.Split('\')
     if (@($parts | Where-Object { $_ -in @('', '.', '..') -or $_.EndsWith(' ') -or $_.EndsWith('.') }).Count -gt 0) {
         throw "Unsafe relative file path: $Path"
+    }
+    foreach ($part in $parts) {
+        if ($part -match '^(CON|PRN|AUX|NUL|CLOCK\$|COM[1-9\u00b9\u00b2\u00b3]|LPT[1-9\u00b9\u00b2\u00b3])(?:\.|$)') { throw "Windows device names are not allowed: $Path" }
     }
     return $p
 }
@@ -84,7 +97,7 @@ function Assert-MRIConfig {
     foreach ($name in @('MaxParallel','PollSeconds','StablePolls','MinimumDiskBytes','MaximumDiskBytes','SetupTimeoutSeconds','CopyTimeoutSeconds')) {
         if ($Config.$name -isnot [int] -and $Config.$name -isnot [long]) { throw "$name must be an integer." }
     }
-    if ($Config.MaxParallel -lt 1 -or $Config.MaxParallel -gt 8) { throw 'MaxParallel must be 1 through 8.' }
+    if ($Config.MaxParallel -lt 1 -or $Config.MaxParallel -gt 30) { throw 'MaxParallel must be 1 through 30.' }
     if ($Config.PollSeconds -lt 1 -or $Config.PollSeconds -gt 30 -or $Config.StablePolls -lt 2 -or $Config.StablePolls -gt 30) {
         throw 'Use PollSeconds 1-30 and StablePolls 2-30.'
     }
@@ -280,24 +293,43 @@ function Assert-MRIDrive {
     return $drive
 }
 function Get-MRITargetVolume {
-    param($Drive)
+    param($Drive,[bool]$RequireDriveLetter=$true)
     $parts=@(Get-Partition -DiskNumber $Drive.Number -ErrorAction Stop)
     if (@($parts | Where-Object { $_.IsBoot -or $_.IsSystem }).Count -gt 0) { throw 'A boot/system partition was found on the target.' }
     if ($parts.Count -ne 1) { throw 'Copy mode requires exactly one existing partition. Prepare a fresh drive or use the registered erase mode.' }
     $p=$parts[0]
     $volumes=@(Get-Volume -Partition $p -ErrorAction Stop)
-    if ($volumes.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$p.DriveLetter)) { throw 'The USB needs one mounted volume with a drive letter.' }
+    if ($volumes.Count -ne 1) { throw 'The USB needs one formatted volume.' }
+    if ($RequireDriveLetter -and [string]::IsNullOrWhiteSpace([string]$p.DriveLetter)) { throw 'The optional setup batch needs a drive letter.' }
     $v=$volumes[0]
+    $letter=[string]$p.DriveLetter
+    if ($letter -notmatch '^[A-Za-z]$') { $letter='' }
+    if ($RequireDriveLetter -and -not $letter) { throw 'The optional setup batch needs a drive letter.' }
     if ([string]$v.Path -notmatch '^\\\\\?\\Volume\{[0-9A-Fa-f-]+\}\\$') { throw 'A stable volume GUID path could not be obtained.' }
-    [pscustomobject]@{ Path=[string]$v.Path; Letter=[string]$p.DriveLetter; Number=$Drive.Number
+    [pscustomobject]@{ Path=[string]$v.Path; Letter=$letter; Number=$Drive.Number
         PartitionNumber=$p.PartitionNumber; FileSystem=[string]$v.FileSystem; FreeBytes=[long]$v.SizeRemaining }
 }
 function Assert-MRITarget {
     param($Record, $Config, $Target, [string[]]$ProtectedKeys=@())
     $d=Assert-MRIDrive $Record $Config $ProtectedKeys $Target.Number
-    $v=Get-MRITargetVolume $d
-    if ($v.Path -ne $Target.Path -or $v.Letter -ne $Target.Letter) { throw 'The USB volume or drive-letter mapping changed. Build stopped.' }
+    $needsLetter=-not [string]::IsNullOrWhiteSpace($Config.SetupBatch)
+    $v=Get-MRITargetVolume $d -RequireDriveLetter $needsLetter
+    if ($v.Path -ne $Target.Path -or ($needsLetter -and $v.Letter -ne $Target.Letter)) { throw 'The USB volume or drive-letter mapping changed. Build stopped.' }
     return $d
+}
+function Get-MRIFileHash {
+    param([string]$Path,[scriptblock]$Guard)
+    $stream=$null; $sha=[Security.Cryptography.SHA256]::Create()
+    try {
+        $stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+        $buffer=New-Object byte[] (1MB)
+        while (($read=$stream.Read($buffer,0,$buffer.Length)) -gt 0) {
+            if ($Guard) { & $Guard | Out-Null }
+            [void]$sha.TransformBlock($buffer,0,$read,$buffer,0)
+        }
+        [void]$sha.TransformFinalBlock($buffer,0,0)
+        return [BitConverter]::ToString($sha.Hash).Replace('-','')
+    } finally { if ($stream) { $stream.Dispose() }; $sha.Dispose() }
 }
 function Get-MRIManifest {
     param([string]$Root, [switch]$IgnoreSystemDirectories, [switch]$NoHash, [scriptblock]$Guard)
@@ -312,6 +344,7 @@ function Get-MRIManifest {
         foreach ($item in @(Get-ChildItem -LiteralPath $stack.Pop() -Force -ErrorAction Stop)) {
             $rel=$item.FullName.Substring($base.Length).Replace('/', '\')
             if ($IgnoreSystemDirectories -and $rel.Split('\')[0] -in @('System Volume Information','$RECYCLE.BIN')) { continue }
+            [void](ConvertTo-MRIRelativePath $rel)
             if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Links are not allowed in media content: $rel" }
             if ($names.ContainsKey($rel)) { throw "Case-insensitive path collision: $rel" }; $names[$rel]=$true
             $entry=[pscustomobject]@{ RelativePath=$rel; IsDirectory=[bool]$item.PSIsContainer; Length=[long]0; Sha256='' }
@@ -321,7 +354,7 @@ function Get-MRIManifest {
                 if (-not $NoHash) {
                     if ($Guard) { & $Guard | Out-Null }
                     $beforeLength=$item.Length; $beforeTime=$item.LastWriteTimeUtc
-                    $entry.Sha256=(Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256 -ErrorAction Stop).Hash
+                    $entry.Sha256=Get-MRIFileHash $item.FullName -Guard $Guard
                     $item.Refresh()
                     if ($item.Length -ne $beforeLength -or $item.LastWriteTimeUtc -ne $beforeTime) { throw "A file changed while being hashed: $rel" }
                     if ($Guard) { & $Guard | Out-Null }
@@ -348,13 +381,14 @@ function Assert-MRIManifest {
         if ($info.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'A target file became a link.' }
         if ($e.RelativePath -notin $MutableFiles) {
             if ($info.Length -ne $e.Length) { throw "File size mismatch: $($e.RelativePath)" }
-            if ((Get-FileHash -LiteralPath $path -Algorithm SHA256 -ErrorAction Stop).Hash -ne $e.Sha256) { throw "SHA-256 mismatch: $($e.RelativePath)" }
+            if ((Get-MRIFileHash $path -Guard $Guard) -ne $e.Sha256) { throw "SHA-256 mismatch: $($e.RelativePath)" }
         } elseif ($info.Length -eq 0 -and $e.Length -ne 0) { throw "Setup left an empty mutable file: $($e.RelativePath)" }
         if ($Guard) { & $Guard | Out-Null }
     }
 }
 function Assert-MRIManifestMatch {
-    param($Expected, $Actual, [string[]]$MutableFiles=@())
+    param($Expected, $Actual, [string[]]$MutableFiles=@(),[switch]$Exact,[switch]$LayoutOnly)
+    if ($Exact -and @($Expected.Entries).Count -ne @($Actual.Entries).Count) { throw 'Media contains unexpected or missing paths.' }
     $index=@{}; foreach ($e in @($Actual.Entries)) { $index[$e.RelativePath]=$e }
     foreach ($e in @($Expected.Entries)) {
         if (-not $index.ContainsKey($e.RelativePath)) { throw "Missing final path: $($e.RelativePath)" }
@@ -362,7 +396,7 @@ function Assert-MRIManifestMatch {
         if ($e.IsDirectory -ne $a.IsDirectory) { throw "Final path type mismatch: $($e.RelativePath)" }
         if ($e.IsDirectory) { continue }
         if ($e.RelativePath -notin $MutableFiles) {
-            if ($e.Length -ne $a.Length -or $e.Sha256 -ne $a.Sha256) { throw "Final file mismatch: $($e.RelativePath)" }
+            if ($e.Length -ne $a.Length -or (-not $LayoutOnly -and $e.Sha256 -ne $a.Sha256)) { throw "Final file mismatch: $($e.RelativePath)" }
         } elseif ($a.Length -eq 0 -and $e.Length -ne 0) { throw "Setup left an empty mutable file: $($e.RelativePath)" }
     }
 }
@@ -440,8 +474,8 @@ function Invoke-MRISetupCommand {
 function Invoke-MRICopy {
     param($Config,$Target,$Manifest,[string]$WorkPath,[scriptblock]$Guard,[string]$CancelPath)
     $planPath=Join-Path $WorkPath 'copy-plan.json'
-    Write-MRIJson $planPath ([pscustomobject]@{SourceRoot=$Config.SourcePath;TargetRoot=$Target.Path;Manifest=$Manifest})
-    $arguments=@('-NoLogo','-NoProfile','-ExecutionPolicy','RemoteSigned','-File',(Join-Path $PSScriptRoot 'Copy-MRIFiles.ps1'),'-PlanPath',$planPath)
+    $planHash=Write-MRIJson $planPath ([pscustomobject]@{SourceRoot=$Config.SourcePath;TargetRoot=$Target.Path;Manifest=$Manifest}) -PassThruHash
+    $arguments=@('-NoLogo','-NoProfile','-ExecutionPolicy','RemoteSigned','-File',(Join-Path $PSScriptRoot 'Copy-MRIFiles.ps1'),'-PlanPath',$planPath,'-ExpectedHash',$planHash)
     $command=($arguments | ForEach-Object { [MRIBatch.NativeProcess]::Quote([string]$_) }) -join ' '
     return Invoke-MRICommand (Get-MRIWindowsExecutable 'WindowsPowerShell\v1.0\powershell.exe') $command $Config.SourcePath (Join-Path $WorkPath 'copy.log') $Config.CopyTimeoutSeconds $Guard -CancelPath $CancelPath
 }
@@ -483,10 +517,55 @@ function Initialize-MRITarget {
     $actual=Get-MRIWritableDisk $Record $Config $ProtectedKeys $ExpectedNumber $CancelPath
     # Stay below the Windows FAT32 format limit and the hardware's usable capacity.
     $size=[long][Math]::Min(32000000000,($actual.Size-2MB))
-    $part=New-Partition -InputObject $actual -Size $size -IsActive -AssignDriveLetter -ErrorAction Stop
+    $needsLetter=-not [string]::IsNullOrWhiteSpace($Config.SetupBatch)
+    $part=New-Partition -InputObject $actual -Size $size -IsActive -AssignDriveLetter:$needsLetter -ErrorAction Stop
     [void](Get-MRIWritableDisk $Record $Config $ProtectedKeys $ExpectedNumber $CancelPath)
     $part | Format-Volume -FileSystem FAT32 -NewFileSystemLabel $Record.Label -Force -Confirm:$false -ErrorAction Stop | Out-Null
-    return Get-MRITargetVolume (Assert-MRIDrive $Record $Config $ProtectedKeys $ExpectedNumber)
+    return Get-MRITargetVolume (Assert-MRIDrive $Record $Config $ProtectedKeys $ExpectedNumber) -RequireDriveLetter $needsLetter
+}
+function Get-MRIRecipe {
+    param($Config,$SourceManifest)
+    # Operational settings do not change the copied media. Moving an identical
+    # source or changing concurrency/timeouts must not force a rebuild.
+    $media=[ordered]@{Version=2;PrepareDisk=$Config.PrepareDisk;FileSystem=$Config.FileSystem
+        SetupBatch=$Config.SetupBatch;SetupArguments=@($Config.SetupArguments);SetupInteractive=$Config.SetupInteractive
+        RequiredFiles=@($Config.RequiredFiles);MutableFiles=@($Config.MutableFiles);SourceDigest=$SourceManifest.Digest}
+    return Get-MRIHash (ConvertTo-Json $media -Depth 8 -Compress)
+}
+function Test-MRILegacyDirectReceipt {
+    param($Receipt,$Config,$SourceManifest,$Target)
+    if ($null -ne $Receipt.PSObject.Properties['RecipeVersion'] -or $Receipt.SetupExit -ne $null -or
+        $Receipt.SourceDigest -ne $SourceManifest.Digest -or $Target.FileSystem -ne 'FAT32') { return $false }
+    try { Assert-MRIManifestMatch $SourceManifest $Receipt.TargetManifest -Exact } catch { return $false }
+    if ($Config.PrepareDisk) {
+        $disk=Get-Disk -Number $Target.Number -ErrorAction Stop
+        $partition=@(Get-Partition -DiskNumber $Target.Number -PartitionNumber $Target.PartitionNumber -ErrorAction Stop)
+        if ([string]$disk.PartitionStyle -ne 'MBR' -or $partition.Count -ne 1 -or -not $partition[0].IsActive) { return $false }
+    }
+    return $true
+}
+function Start-MRIBuildJob {
+    param([string]$ModulePath,$Record,[string]$ConfigPath,[string]$ConfigHash,[string]$ManifestPath,[string]$ManifestHash,
+        [string[]]$ProtectedKeys,[string]$StatePath,[string]$ReceiptPath,[string]$WorkPath,[string]$CancelPath)
+    return Start-Job -ScriptBlock {
+        param($module,$record,$snapshot,$configHash,$manifestPath,$manifestHash,$protected,$statePath,$receiptPath,$work,$cancel)
+        $ErrorActionPreference='Stop'
+        Import-Module $module -Force -DisableNameChecking
+        $config=Read-MRIAuthenticatedJson $snapshot $configHash
+        $manifest=Read-MRIAuthenticatedJson $manifestPath $manifestHash
+        Invoke-MRIBuild $record $config $manifest @($protected) $statePath $receiptPath $work $cancel
+    } -ArgumentList $ModulePath,$Record,$ConfigPath,$ConfigHash,$ManifestPath,$ManifestHash,$ProtectedKeys,$StatePath,$ReceiptPath,$WorkPath,$CancelPath
+}
+function Select-MRIBuilds {
+    param([array]$Arrivals,[hashtable]$Jobs,[int]$MaxParallel)
+    if ($MaxParallel -lt 1 -or $MaxParallel -gt 30) { throw 'Use 1 through 30 simultaneous builds.' }
+    $remaining=[Math]::Max(0,$MaxParallel-$Jobs.Count)
+    $selected=@{}
+    foreach ($record in $Arrivals) {
+        if ($remaining -eq 0) { break }
+        if ($Jobs.ContainsKey($record.Key) -or $selected.ContainsKey($record.Key)) { continue }
+        $selected[$record.Key]=$true; $remaining--; $record
+    }
 }
 function Invoke-MRIBuild {
     param($Record, $Config, $SourceManifest, [string[]]$ProtectedKeys, [string]$StatePath,
@@ -501,6 +580,7 @@ function Invoke-MRIBuild {
         Set-MRIState $StatePath $Record 'CHECKING'
         $drive=Assert-MRIDrive $Record $Config $ProtectedKeys; $number=$drive.Number
         $runSetup=-not [string]::IsNullOrWhiteSpace($Config.SetupBatch)
+        if (-not @($SourceManifest.Entries | Where-Object { -not $_.IsDirectory }).Count) { throw 'The source contains no files. Preparation was not started.' }
         if (-not $runSetup) {
             foreach ($required in @($Config.RequiredFiles)) {
                 if (-not @($SourceManifest.Entries | Where-Object { $_.RelativePath -eq $required -and -not $_.IsDirectory -and $_.Length -gt 0 }).Count) {
@@ -518,7 +598,7 @@ function Invoke-MRIBuild {
         $alreadyVerified=$false
         $parts=@(Get-Partition -DiskNumber $number -ErrorAction Stop)
         if ($parts.Count -gt 0) {
-            $target=Get-MRITargetVolume $drive
+            $target=Get-MRITargetVolume $drive -RequireDriveLetter $runSetup
             $guardClock=[Diagnostics.Stopwatch]::StartNew()
             $guard={
                 param([bool]$ForceCheck=$false)
@@ -531,12 +611,21 @@ function Invoke-MRIBuild {
             $alreadyVerified=Assert-MRIContentsSafe $target.Path $receipt $guard
         } elseif (-not $Config.PrepareDisk) { throw 'Unpartitioned drive: select registered erase/prepare mode first.' }
         $identity=$(if ($null -ne $Config.PSObject.Properties['RecipeIdentity']) { [string]$Config.RecipeIdentity } else { ConvertTo-Json -InputObject $Config -Depth 6 -Compress })
-        $recipe=Get-MRIHash ($identity+$SourceManifest.Digest)
-        if ($alreadyVerified -and $receipt -and $target -and $receipt.Recipe -eq $recipe -and $receipt.VolumePath -eq $target.Path) {
+        $recipe=Get-MRIRecipe $Config $SourceManifest
+        $sameRecipe=$false
+        if ($receipt -and $target) {
+            $sameRecipe=$receipt.Recipe -eq $recipe -or $receipt.Recipe -eq (Get-MRIHash ($identity+$SourceManifest.Digest))
+            if (-not $sameRecipe -and -not $runSetup) { $sameRecipe=Test-MRILegacyDirectReceipt $receipt $Config $SourceManifest $target }
+        }
+        if ($alreadyVerified -and $receipt -and $target -and $sameRecipe -and $receipt.VolumePath -eq $target.Path) {
             # Full previous-output verification above prevents trusting a stale completion flag.
             & $guard $true | Out-Null
             Flush-MRIVolume $target.Path
             [void](& $guard $true)
+            if ($receipt.Recipe -ne $recipe) {
+                $receipt.Recipe=$recipe; $receipt | Add-Member -NotePropertyName RecipeVersion -NotePropertyValue 2 -Force
+                Write-MRIJson $ReceiptPath $receipt
+            }
             Set-MRIState $StatePath $Record 'ALREADY_READY' 'Already verified for this source and recipe.'
             return [pscustomobject]@{ Success=$true; Label=$Record.Label; AlreadyReady=$true }
         }
@@ -567,10 +656,10 @@ function Invoke-MRIBuild {
         Set-MRIState $StatePath $Record 'COPYING' 'Copying to the pinned volume GUID, not a reusable drive letter.'
         $code=Invoke-MRICopy $Config $target $SourceManifest $WorkPath $guard $CancelPath
         if ($code -ne 0) { throw "The copy worker reported failure (exit $code)." }
-        Set-MRIState $StatePath $Record 'VERIFYING_COPY' 'Verifying every source file with SHA-256.'
-        $copied=Get-MRIManifest $target.Path -IgnoreSystemDirectories -Guard $guard
+        Set-MRIState $StatePath $Record 'VERIFYING_COPY' 'Checking copied paths and file sizes; SHA-256 verification follows the write flush.'
+        $copied=Get-MRIManifest $target.Path -IgnoreSystemDirectories -NoHash:(-not $runSetup) -Guard $guard
         if (@($copied.Entries).Count -ne @($SourceManifest.Entries).Count) { throw 'Copied media contains paths absent from the source snapshot. Setup was not started.' }
-        Assert-MRIManifestMatch $SourceManifest $copied
+        Assert-MRIManifestMatch $SourceManifest $copied -Exact -LayoutOnly:(-not $runSetup)
         $setupExit=$null
         if ($runSetup) {
             Set-MRIState $StatePath $Record 'SETUP' 'Running the configured media-creation batch and waiting for its process tree.'
@@ -586,14 +675,14 @@ function Invoke-MRIBuild {
             if (-not [IO.File]::Exists($path) -or (Get-Item -LiteralPath $path).Length -eq 0) { throw "Required final file missing or empty: $required" }
         }
         $final=Get-MRIManifest $target.Path -IgnoreSystemDirectories -Guard $guard
-        Assert-MRIManifestMatch $SourceManifest $final -MutableFiles @($Config.MutableFiles)
+        Assert-MRIManifestMatch $SourceManifest $final -MutableFiles @($Config.MutableFiles) -Exact:(-not $runSetup)
         [void](& $guard $true)
-        Write-MRIJson $ReceiptPath ([pscustomobject]@{ Key=$Record.Key; Label=$Record.Label; Status='READY'; Recipe=$recipe
+        Write-MRIJson $ReceiptPath ([pscustomobject]@{ Key=$Record.Key; Label=$Record.Label; Status='READY'; Recipe=$recipe; RecipeVersion=2
             SourceDigest=$SourceManifest.Digest; SetupExit=$setupExit; CopyExit=$code; VolumePath=$target.Path
             TargetManifest=$final; CompletedUtc=[datetime]::UtcNow.ToString('o') })
         $newReceipt=$true
         [void](& $guard $true)
-        Set-MRIState $StatePath $Record 'READY' 'Files verified; required boot files checked; writes flushed. Safely eject in Windows.'
+        Set-MRIState $StatePath $Record 'READY' 'Files verified; writes flushed. Safely eject in Windows.'
         return [pscustomobject]@{ Success=$true; Label=$Record.Label; AlreadyReady=$false }
     } catch {
         if ($newReceipt -and [IO.File]::Exists($ReceiptPath)) { [IO.File]::Delete($ReceiptPath) }

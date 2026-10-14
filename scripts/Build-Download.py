@@ -9,7 +9,7 @@ import subprocess
 import zipfile
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--version', default='0.2.0')
+parser.add_argument('--version', default='0.3.0')
 parser.add_argument('--history-bundle', type=Path)
 parser.add_argument('--output', type=Path)
 args = parser.parse_args()

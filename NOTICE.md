@@ -24,6 +24,11 @@ without a setup batch, corrected cancellation and storage-object checks before
 preparation, clarified the single launcher, and added archive, package, and
 owned Windows ISO/VHD regression checks.
 
+**Modified 10-14-2026 (v0.3.0):** added adjustable parallel preparation/copying
+and letter-free direct-copy targets, removed redundant direct-copy hashing,
+added authenticated runtime data and cancellable hashing, strengthened path
+and exact-content checks, and added owned parallel Windows storage tests.
+
 This entire modified project is released under the **GNU General Public
 License, version 3 only** (`GPL-3.0-only`). Recipients may copy, modify, and
 redistribute it under that license. The full upstream license is preserved
