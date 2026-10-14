@@ -6,6 +6,24 @@ using System.Runtime.InteropServices;
 using System.ComponentModel;
 
 namespace MRIBatch {
+    public static class NativeFiles {
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true, EntryPoint="CreateDirectoryW")]
+        private static extern bool CreateDirectoryNative(string path, IntPtr security);
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true, EntryPoint="GetFileAttributesW")]
+        private static extern uint GetAttributes(string path);
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true, EntryPoint="CopyFileW")]
+        private static extern bool CopyNative(string source, string target, bool failIfExists);
+        public static void CreateDirectory(string path) {
+            if(CreateDirectoryNative(path,IntPtr.Zero)) return;
+            int error=Marshal.GetLastWin32Error();
+            uint attributes=GetAttributes(path);
+            if(error==183 && attributes!=uint.MaxValue && (attributes & 0x10)!=0 && (attributes & 0x400)==0) return;
+            throw new Win32Exception(error);
+        }
+        public static void Copy(string source, string target) {
+            if(!CopyNative(source,target,true)) throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+    }
     public sealed class NativeProcess : IDisposable {
         private IntPtr job, process;
         private bool disposed;
