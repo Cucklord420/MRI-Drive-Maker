@@ -7,6 +7,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::io::{self, Read};
+use std::fs;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -114,11 +115,28 @@ fn respond(request: &Request) -> Response {
 }
 
 fn main() {
-    let mut input = String::new();
-    if io::stdin().read_to_string(&mut input).is_err() {
-        eprintln!("Could not read selection input.");
-        std::process::exit(2);
-    }
+    // Windows PowerShell 5.1 can transcode native stdin; explicit UTF-8 files
+    // avoid locale-dependent inventory corruption during parity tests.
+    let input = match std::env::args().collect::<Vec<_>>().as_slice() {
+        [_] => {
+            let mut content = String::new();
+            if io::stdin().read_to_string(&mut content).is_err() {
+                eprintln!("Could not read selection input.");
+                std::process::exit(2);
+            }
+            content
+        }
+        [_, flag, filename] if flag == "--input-file" => {
+            fs::read_to_string(filename).unwrap_or_else(|_| {
+                eprintln!("Could not read UTF-8 selection file.");
+                std::process::exit(2);
+            })
+        }
+        _ => {
+            eprintln!("Usage: mri-safety [--input-file PATH]");
+            std::process::exit(2);
+        }
+    };
     let request: Request = match serde_json::from_str(&input) {
         Ok(value) => value,
         Err(_) => {
