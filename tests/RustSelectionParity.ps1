@@ -80,3 +80,6 @@ Test-Parity -Selection '6' -Inventory $offline -ProtectedKeys @()
 $duplicate=@(New-FakeDisk 6;New-FakeDisk 6;New-FakeDisk 8)
 Test-Parity -Selection '6' -Inventory $duplicate -ProtectedKeys @()
 Write-Host 'PASS: 112 synthetic Rust/PowerShell selection parity cases; no disks touched.'
+
+# A rejected synthetic selection leaves LASTEXITCODE=1; successful parity must exit zero.
+exit 0
