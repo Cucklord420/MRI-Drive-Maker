@@ -3,6 +3,8 @@
 //! NO disk enumeration, formatting, erasing, mounting, or write capability.
 //! Intended for parity testing against MRI.Batch.psm1 before native integration.
 
+mod identity;
+
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -115,6 +117,25 @@ fn respond(request: &Request) -> Response {
 }
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if let [_, flag, file] = args.as_slice() {
+        if flag == "--identity-json" {
+            let raw = fs::read_to_string(file).unwrap_or_else(|_| {
+                eprintln!("Could not read UTF-8 hardware identity JSON.");
+                std::process::exit(2)
+            });
+            let record: identity::HardwareIdentity = serde_json::from_str(&raw)
+                .unwrap_or_else(|_| {
+                    eprintln!("Invalid hardware identity JSON. No disk can be approved.");
+                    std::process::exit(2)
+                });
+            let result = identity::evaluate(&record);
+            let failed = result.error.is_some();
+            println!("{}", serde_json::to_string(&result).expect("response serialization"));
+            if failed { std::process::exit(1); }
+            return;
+        }
+    }
     // Windows PowerShell 5.1 can transcode native stdin; explicit UTF-8 files
     // avoid locale-dependent inventory corruption during parity tests.
     let input = match std::env::args().collect::<Vec<_>>().as_slice() {
