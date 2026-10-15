@@ -2,14 +2,15 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Added 10-14-2026. Internal worker; open START-MRI-DRIVE-MAKER.cmd.
 [CmdletBinding()]
-param([Parameter(Mandatory=$true)][string]$PlanPath)
+param([Parameter(Mandatory=$true)][string]$PlanPath,
+      [Parameter(Mandatory=$true)][ValidatePattern('^[A-Fa-f0-9]{64}$')][string]$ExpectedHash)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 try {
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'The copy worker requires Windows.' }
     Import-Module (Join-Path $PSScriptRoot 'MRI.Batch.psm1') -Force -DisableNameChecking
     Initialize-MRINative
-    $plan=Read-MRIJson $PlanPath
+    $plan=Read-MRIAuthenticatedJson $PlanPath $ExpectedHash
     if ([string]$plan.TargetRoot -notmatch '^\\\\\?\\Volume\{[0-9A-Fa-f-]+\}\\$') { throw 'The copy target must be a volume GUID root.' }
     Assert-MRIPlainDirectory $plan.SourceRoot
     Assert-MRIPlainDirectory $plan.TargetRoot

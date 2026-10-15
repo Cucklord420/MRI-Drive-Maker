@@ -12,3 +12,9 @@ mri-config.json
 
 !/validation/audit-10-14-2026/
 !/validation/audit-10-14-2026/**
+
+!/validation/concurrency-10-14-2026/
+!/validation/concurrency-10-14-2026/**
+
+!/validation/cleanup-10-15-2026/
+!/validation/cleanup-10-15-2026/**

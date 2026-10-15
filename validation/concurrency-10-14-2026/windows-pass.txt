@@ -1,0 +1,44 @@
+2026-10-14T06:14:11.4817593Z PASS Direct -File launch with default configuration from another folder
+2026-10-14T06:14:11.9862467Z PASS Direct -File launch accepts an explicit configuration path
+2026-10-14T06:14:12.4594499Z PASS Direct -File launch accepts an empty configuration path
+2026-10-14T06:14:12.9805932Z PASS Legacy MRI_CreatorV3.ps1 launches the current menu
+2026-10-14T06:14:13.4717889Z PASS Legacy MRI_CreatorV4.ps1 launches the current menu
+2026-10-14T06:14:19.3100711Z   64/64 tests passed.
+2026-10-14T06:14:19.3111393Z PASS Main entry point runs the full simulated suite via -File -Action SelfTest
+2026-10-14T06:14:25.1438222Z PASS Validation runner resolves omitted paths after -File parameter binding
+2026-10-14T06:14:25.6387956Z PASS Start-MRI-Batch.cmd launches Windows PowerShell 5.1 from a folder with spaces and ampersand
+2026-10-14T06:14:25.6591483Z 8/8 startup tests passed.
+2026-10-14T06:14:25.6633649Z     "PowerShellVersion":  "5.1.26100.33438",
+2026-10-14T06:14:29.1456231Z PASS: parent exit did not cause premature completion; its child finished first.
+2026-10-14T06:14:29.8791473Z PASS: cancellation terminated the remaining child process.
+2026-10-14T06:14:30.6113930Z PASS Extracted source folders open without a setup batch
+2026-10-14T06:14:30.6331589Z PASS Single wrapper folders resolve to the actual boot-file root
+2026-10-14T06:14:30.7412453Z PASS ZIP contents open in an isolated cache and are removed on close
+2026-10-14T06:14:30.7652967Z PASS Archive traversal paths are rejected before extraction
+2026-10-14T06:14:30.7738258Z PASS Archive case-insensitive duplicate paths are rejected
+2026-10-14T06:14:30.7775520Z PASS Unknown source kinds are rejected
+2026-10-14T06:14:30.8155886Z PASS Windows device aliases in source archives are rejected before files are extracted
+2026-10-14T06:14:30.8573692Z PASS Authenticated runtime data detects tampering before it can be used
+2026-10-14T06:14:31.0260730Z PASS Chunked SHA-256 matches the standard result and checks cancellation inside a large file
+2026-10-14T06:14:31.0384376Z PASS A cancelled storage-object query cannot reach disk APIs
+2026-10-14T06:14:31.0812330Z PASS A matching fresh storage object is returned for the registered physical drive
+2026-10-14T06:14:31.0926657Z PASS A replacement reusing the displayed disk number is blocked before erasure
+2026-10-14T06:14:31.0983233Z PASS A fresh non-USB storage object is blocked even when inventory says USB
+2026-10-14T06:14:31.1023550Z 13/13 source tests passed.
+2026-10-14T06:14:34.0758076Z PASS Windows storage cmdlets expose the parameter sets used by the builder
+2026-10-14T06:14:35.5806485Z PASS A real ISO opens read-only and exposes its contained boot-file tree
+2026-10-14T06:14:35.6924023Z PASS An existing ISO mount is reused and not ejected by a second source context
+2026-10-14T06:14:40.7861151Z PASS Actual FAT32 volume GUID paths can be enumerated safely
+2026-10-14T06:14:42.8895286Z PASS ISO-to-volume copy runs the real copy worker, verification and volume flushing
+2026-10-14T06:14:43.3356757Z PASS Actual verified media is skipped on reinsertion
+2026-10-14T06:14:43.5594133Z PASS Unexpected content on the virtual target prevents a second copy
+2026-10-14T06:14:43.7943898Z PASS Destructive storage guard rejects a file-backed disk even with mocked USB inventory
+2026-10-14T06:14:43.7980716Z 8/8 Windows storage checks passed. Only owned ISO/VHD fixtures were used.
+2026-10-14T06:14:45.0484094Z PASS Packaged source hashes and the single obvious launcher are correct.
+2026-10-14T06:14:45.6311484Z PASS The actual packaged top-level launcher opens the ISO menu on Windows PowerShell 5.1.
+2026-10-14T06:15:13.4353127Z PASS Four real background builds prepare FAT32 and copy verified files to separate owned VHD roots
+2026-10-14T06:15:13.4579197Z PASS All four actual native copy-worker process lifetimes overlap
+2026-10-14T06:15:14.0357970Z PASS FAT32 copies and hashes work without assigning drive letters
+2026-10-14T06:15:16.0345674Z PASS Changing the real build concurrency does not format or copy verified media again
+2026-10-14T06:15:17.0882760Z PASS The actual copy worker rejects a redirected plan before touching its target
+2026-10-14T06:15:17.0902034Z 5/5 parallel Windows storage checks passed. Only owned VHD fixtures were modified.

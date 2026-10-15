@@ -62,9 +62,9 @@ try {
     foreach ($name in @('MRI-Batch.ps1','MRI.Batch.psm1','Copy-MRIFiles.ps1','NativeProcess.cs','mri-config.example.json','LICENSE')) {
         Copy-Item -LiteralPath (Join-Path $root $name) -Destination $app
     }
-    foreach ($name in @('Start-MRI-Batch.cmd','MRI_CreatorV3.ps1','MRI_CreatorV4.ps1')) {
-        if ([IO.File]::Exists((Join-Path $root $name))) { Copy-Item -LiteralPath (Join-Path $root $name) -Destination $app }
-    }
+    $launcher=Join-Path $root 'START-MRI-DRIVE-MAKER.cmd'
+    if (-not [IO.File]::Exists($launcher)) { $launcher=Join-Path (Split-Path $root -Parent) 'START-MRI-DRIVE-MAKER.cmd' }
+    Copy-Item -LiteralPath $launcher -Destination $app
     Copy-Item -LiteralPath (Join-Path $root 'tests') -Destination $app -Recurse
     # Console input is a host capability, not part of the path regression.
     # Only the temporary copy exports a fixed Q response so headless Windows
@@ -84,12 +84,6 @@ Export-ModuleMember -Function '*-MRI*','Initialize-MRINative','Read-Host'
     Test-Startup 'Direct -File launch accepts an empty configuration path' {
         Check-Menu (Invoke-Script $entry @('-ConfigPath','') "Q`n")
     }
-    foreach ($entryName in @('MRI_CreatorV3.ps1','MRI_CreatorV4.ps1')) {
-        if (-not [IO.File]::Exists((Join-Path $app $entryName))) { continue }
-        Test-Startup "Legacy $entryName launches the current menu" {
-            Check-Menu (Invoke-Script (Join-Path $app $entryName) -InputText "Q`n")
-        }
-    }
     Test-Startup 'Main entry point runs the full simulated suite via -File -Action SelfTest' {
         $output=Invoke-Script $entry @('-Action','SelfTest')
         $summary=[regex]::Match($output,'(?m)^(\d+)/(\d+) tests passed\.')
@@ -107,10 +101,10 @@ Export-ModuleMember -Function '*-MRI*','Initialize-MRINative','Read-Host'
             throw 'Validation report did not record a successful suite.'
         }
     }
-    if ($windows -and [IO.File]::Exists((Join-Path $app 'Start-MRI-Batch.cmd'))) {
-        Test-Startup 'Start-MRI-Batch.cmd launches Windows PowerShell 5.1 from a folder with spaces and ampersand' {
+    if ($windows) {
+        Test-Startup 'The sole START-MRI-DRIVE-MAKER.cmd launcher starts PowerShell 5.1 from a folder with spaces and ampersand' {
             $cmd=Join-Path $env:SystemRoot 'System32/cmd.exe'
-            $argsLine='/d /s /c ""'+(Join-Path $app 'Start-MRI-Batch.cmd')+'""'
+            $argsLine='/d /s /c ""'+(Join-Path $app 'START-MRI-DRIVE-MAKER.cmd')+'""'
             Check-Menu (Invoke-StartupProcess $cmd $argsLine "Q`r`n")
         }
     }

@@ -1,26 +1,33 @@
-OPEN THIS FILE TO RUN THE TOOL:
-START-MRI-DRIVE-MAKER.cmd
-
+OPEN: START-MRI-DRIVE-MAKER.cmd
 Right-click it and choose Run as administrator.
 
-1. Choose 1 in the menu and select your official MRI .iso file.
-   A .zip archive or an already-extracted folder is also supported.
-   The ISO is opened read-only. You do not need to run a batch file.
-2. Choose copy mode for empty FAT32 drives, or prepare mode to format
-   individually registered MRI drives as MBR/FAT32.
-3. Choose 2 to register the intended physical USB drives once.
-   Check their hardware serials. Prepare mode requires ERASE confirmation.
-4. Choose 4 to watch. Plug in registered drives; verified drives show READY.
-   Use Windows Safely Remove before unplugging. Q stops the watcher.
+1. Menu 1: choose the extracted MRI folder. Its contents will go directly
+   to each USB root. Actual ISO and ZIP files are supported too.
+2. Menu 2: check the USB list, then enter the intended disk numbers
+   separated by commas, for example 6,7,8.
+3. Type the displayed ERASE confirmation. ALL files and partitions on
+   these selected USBs will be deleted. No registration is needed.
+4. Keep them connected until READY. The batch ends when each selected
+   drive succeeds or fails. Use Windows Safely Remove before unplugging.
+   Q cancels unfinished builds.
 
-App contains the editable program source and tests.
-Developer contains historical source and validation records.
-You only need to open START-MRI-DRIVE-MAKER.cmd.
+New settings allow 4 builds at once. Menu 4 changes the limit to 1-30.
+Existing saved limits are preserved. Waiting selected drives start as slots
+open. Shared USB bandwidth limits speed.
 
-This is an independent open-source media builder, not the official
-BDE-to-USB utility. Exact BDE-to-USB equivalence and physical MRI booting
-have not been verified. Use only an authorized current source image.
+The selected folder is copied exactly to the root, without a wrapper.
+Preparation creates active MBR/FAT32 using up to 32,000,000,000 bytes.
+Every target file receives SHA-256 verification after writes are flushed.
+System, source and application disks are excluded. A selected drive that
+is removed, replaced or renumbered fails rather than redirecting a build.
 
-No proprietary MRI files or BDE-to-USB program are included.
-LICENSE contains the unchanged GPL version 3 license.
-Software fees: $0. Hardware and staff costs vary.
+A Advanced retains the registered-drive automatic watcher. That mode
+still blocks unexpected files and does not inherit a batch's erase approval.
+
+App contains editable source and tests. Open only the top-level launcher.
+Original sources, old launchers and historical reports stay on GitHub.
+
+READY confirms file copying, not a firmware boot test. No proprietary MRI
+files or BDE-to-USB utility are included. Use an authorized source.
+LICENSE is the unchanged GPL v3 license; NOTICE.md records modifications.
+Software TCO: $0. Staff, hardware and electricity costs vary.

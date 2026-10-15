@@ -24,6 +24,18 @@ without a setup batch, corrected cancellation and storage-object checks before
 preparation, clarified the single launcher, and added archive, package, and
 owned Windows ISO/VHD regression checks.
 
+**Modified 10-14-2026 (v0.3.0):** added adjustable parallel preparation/copying
+and letter-free direct-copy targets, removed redundant direct-copy hashing,
+added authenticated runtime data and cancellable hashing, strengthened path
+and exact-content checks, and added owned parallel Windows storage tests.
+
+**Modified 10-15-2026:** re-read original V3/V4 logic and restored a simple
+selected-drive clean/FAT32/copy-to-root workflow with one batch erase-list
+confirmation. Automatic watching and legacy batch recipes remain advanced
+options. Archived old launcher aliases as text and removed historical logs
+and Git bundles from the user ZIP; original source bytes remain in the repo.
+Added selection/consent and real finite-batch Windows VHD checks.
+
 This entire modified project is released under the **GNU General Public
 License, version 3 only** (`GPL-3.0-only`). Recipients may copy, modify, and
 redistribute it under that license. The full upstream license is preserved

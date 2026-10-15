@@ -1,0 +1,15 @@
+PASS Extracted source folders open without a setup batch
+PASS Single wrapper folders resolve to the actual boot-file root
+PASS ZIP contents open in an isolated cache and are removed on close
+PASS Archive traversal paths are rejected before extraction
+PASS Archive case-insensitive duplicate paths are rejected
+PASS Unknown source kinds are rejected
+PASS Windows device aliases in source archives are rejected before files are extracted
+PASS Authenticated runtime data detects tampering before it can be used
+PASS Chunked SHA-256 matches the standard result and checks cancellation inside a large file
+PASS A cancelled storage-object query cannot reach disk APIs
+PASS A matching fresh storage object is returned for the registered physical drive
+PASS A replacement reusing the displayed disk number is blocked before erasure
+PASS A fresh non-USB storage object is blocked even when inventory says USB
+
+13/13 source tests passed.
