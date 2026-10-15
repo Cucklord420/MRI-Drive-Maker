@@ -17,7 +17,10 @@ try {
     $package=$folders[0].FullName
     $launchers=@(Get-ChildItem -LiteralPath $package -File | Where-Object { $_.Extension -in @('.cmd','.ps1','.exe') })
     if ($launchers.Count -ne 1 -or $launchers[0].Name -ne 'START-MRI-DRIVE-MAKER.cmd') { throw 'Package has competing top-level launchers.' }
+    if ([IO.Directory]::Exists((Join-Path $package 'Developer')) -or [IO.Directory]::Exists((Join-Path $package 'legacy'))) { throw 'Historical files must stay out of the user download.' }
     $manifest=Read-MRIJson (Join-Path $package 'RELEASE.json')
+    $actualFiles=@(Get-ChildItem -LiteralPath $package -Recurse -File)
+    if ($actualFiles.Count -ne (@($manifest.sha256.PSObject.Properties).Count+1)) { throw 'Package contains undeclared files.' }
     foreach ($property in $manifest.sha256.PSObject.Properties) {
         $path=Join-MRIPath $package $property.Name
         if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ine $property.Value) { throw "Package hash mismatch: $($property.Name)" }
@@ -38,8 +41,8 @@ try {
             $process.StandardInput.Close()
             if (-not $process.WaitForExit(30000)) { & (Join-Path $env:SystemRoot 'System32/taskkill.exe') /PID $process.Id /T /F | Out-Null; throw 'Packaged launcher timed out.' }
             $output=$stdout.GetAwaiter().GetResult()+$stderr.GetAwaiter().GetResult()
-            if ($process.ExitCode -ne 0 -or -not $output.Contains('Choose MRI ISO') -or -not $output.Contains('Set simultaneous builds')) { throw "Packaged launcher failed: $output" }
-            Write-Host 'PASS The actual packaged top-level launcher opens the ISO menu on Windows PowerShell 5.1.'
+            if ($process.ExitCode -ne 0 -or -not $output.Contains('Choose MRI folder') -or -not $output.Contains('Set simultaneous builds') -or -not $output.Contains('Clean, format FAT32 and copy to selected USBs')) { throw "Packaged launcher failed: $output" }
+            Write-Host 'PASS The actual packaged top-level launcher opens the selected-drive menu on Windows PowerShell 5.1.'
         } finally { $process.Dispose() }
     }
 } finally { Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue }

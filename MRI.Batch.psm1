@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# GPL-3.0-only. Updated 10-14-2026 for concurrency and security checks.
+# GPL-3.0-only. Updated 10-15-2026 for selected-drive builds and safety checks.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -269,6 +269,27 @@ function Get-MRIDriveBlockReason {
     if ($Drive.Size -lt $Config.MinimumDiskBytes -or $Drive.Size -gt $Config.MaximumDiskBytes) { return 'Capacity is outside the configured MRI range.' }
     if (@($Inventory | Where-Object { $_.Serial -eq $Drive.Serial }).Count -ne 1) { return 'Duplicate USB serial number; cannot identify this drive safely.' }
     return $null
+}
+function Select-MRIUsbDrives {
+    param([string]$Selection,[array]$Inventory,$Config,[string[]]$ProtectedKeys=@())
+    if ([string]::IsNullOrWhiteSpace($Selection)) { return }
+    if ($Selection -notmatch '^\s*\d+(\s*,\s*\d+)*\s*$') { throw 'Enter disk numbers separated by commas.' }
+    $numbers=@()
+    foreach ($text in $Selection.Split(',')) {
+        $number=0
+        if (-not [int]::TryParse($text.Trim(),[ref]$number)) { throw 'Invalid disk number.' }
+        if ($number -notin $numbers) { $numbers+=$number }
+    }
+    # Validate the entire selection before returning anything to the caller.
+    $selected=@()
+    foreach ($number in $numbers) {
+        $matches=@($Inventory | Where-Object { $_.Number -eq $number })
+        if ($matches.Count -ne 1) { throw "Disk $number was not in the displayed USB list." }
+        $reason=Get-MRIDriveBlockReason $matches[0] $Inventory $Config $ProtectedKeys
+        if ($reason) { throw ('Disk {0}: {1}' -f $number,$reason) }
+        $selected+=$matches[0]
+    }
+    return $selected
 }
 function Assert-MRIRegistry {
     param([array]$Records)
@@ -579,15 +600,16 @@ function Test-MRILegacyDirectReceipt {
 }
 function Start-MRIBuildJob {
     param([string]$ModulePath,$Record,[string]$ConfigPath,[string]$ConfigHash,[string]$ManifestPath,[string]$ManifestHash,
-        [string[]]$ProtectedKeys,[string]$StatePath,[string]$ReceiptPath,[string]$WorkPath,[string]$CancelPath)
+        [string[]]$ProtectedKeys,[string]$StatePath,[string]$ReceiptPath,[string]$WorkPath,[string]$CancelPath,
+        [Nullable[int]]$ApprovedEraseNumber=$null)
     return Start-Job -ScriptBlock {
-        param($module,$record,$snapshot,$configHash,$manifestPath,$manifestHash,$protected,$statePath,$receiptPath,$work,$cancel)
+        param($module,$record,$snapshot,$configHash,$manifestPath,$manifestHash,$protected,$statePath,$receiptPath,$work,$cancel,$approvedNumber)
         $ErrorActionPreference='Stop'
         Import-Module $module -Force -DisableNameChecking
         $config=Read-MRIAuthenticatedJson $snapshot $configHash
         $manifest=Read-MRIAuthenticatedJson $manifestPath $manifestHash
-        Invoke-MRIBuild $record $config $manifest @($protected) $statePath $receiptPath $work $cancel
-    } -ArgumentList $ModulePath,$Record,$ConfigPath,$ConfigHash,$ManifestPath,$ManifestHash,$ProtectedKeys,$StatePath,$ReceiptPath,$WorkPath,$CancelPath
+        Invoke-MRIBuild $record $config $manifest @($protected) $statePath $receiptPath $work $cancel -ApprovedEraseNumber $approvedNumber
+    } -ArgumentList $ModulePath,$Record,$ConfigPath,$ConfigHash,$ManifestPath,$ManifestHash,$ProtectedKeys,$StatePath,$ReceiptPath,$WorkPath,$CancelPath,$ApprovedEraseNumber
 }
 function Select-MRIBuilds {
     param([array]$Arrivals,[hashtable]$Jobs,[int]$MaxParallel)
@@ -602,7 +624,8 @@ function Select-MRIBuilds {
 }
 function Invoke-MRIBuild {
     param($Record, $Config, $SourceManifest, [string[]]$ProtectedKeys, [string]$StatePath,
-        [string]$ReceiptPath, [string]$WorkPath, [string]$CancelPath)
+        [string]$ReceiptPath, [string]$WorkPath, [string]$CancelPath,
+        [Nullable[int]]$ApprovedEraseNumber=$null)
     $target=$null; $number=$null; $newReceipt=$false
     try {
         Assert-MRINotCancelled $CancelPath
@@ -611,7 +634,9 @@ function Invoke-MRIBuild {
         Initialize-MRINative
         [void][IO.Directory]::CreateDirectory($WorkPath)
         Set-MRIState $StatePath $Record 'CHECKING'
-        $drive=Assert-MRIDrive $Record $Config $ProtectedKeys; $number=$drive.Number
+        $eraseSelected=$null -ne $ApprovedEraseNumber
+        if ($eraseSelected -and (-not $Config.PrepareDisk -or -not $Record.AllowErase)) { throw 'Selected-drive erasure requires preparation and explicit erase approval.' }
+        $drive=Assert-MRIDrive $Record $Config $ProtectedKeys $ApprovedEraseNumber; $number=$drive.Number
         $runSetup=-not [string]::IsNullOrWhiteSpace($Config.SetupBatch)
         if (-not @($SourceManifest.Entries | Where-Object { -not $_.IsDirectory }).Count) { throw 'The source contains no files. Preparation was not started.' }
         if (-not $runSetup) {
@@ -624,13 +649,18 @@ function Invoke-MRIBuild {
         if (@($SourceManifest.Entries | Where-Object { -not $_.IsDirectory -and $_.Length -gt 4294967295 }).Count) { throw 'A source file is larger than FAT32 permits.' }
         if ($Config.PrepareDisk -and ($SourceManifest.TotalBytes+256MB) -gt [Math]::Min(32000000000,($drive.Size-2MB))) { throw 'Source does not fit this USB; preparation was not started.' }
         $receipt=$null
-        if ([IO.File]::Exists($ReceiptPath)) {
+        if (-not $eraseSelected -and [IO.File]::Exists($ReceiptPath)) {
             $receipt=Read-MRIJson $ReceiptPath
             if ($receipt.Key -ne $Record.Key -or $receipt.Status -ne 'READY') { throw 'Invalid previous drive receipt.' }
         }
         $alreadyVerified=$false
         $parts=@(Get-MRIExistingPartitions $number)
-        if ($parts.Count -gt 0) {
+        if ($eraseSelected) {
+            # This session's displayed erase list is the consent for existing
+            # contents, including multiple or unformatted partitions. Automatic
+            # watcher builds continue to require empty or receipt-matched media.
+            if (@($parts | Where-Object { $_.IsBoot -or $_.IsSystem }).Count) { throw 'A boot/system partition was found on the selected target.' }
+        } elseif ($parts.Count -gt 0) {
             $target=Get-MRITargetVolume $drive -RequireDriveLetter $runSetup
             $guardClock=[Diagnostics.Stopwatch]::StartNew()
             $guard={
@@ -666,7 +696,9 @@ function Invoke-MRIBuild {
             Assert-MRINotCancelled $CancelPath
             Set-MRIState $StatePath $Record 'PREPARING' 'Preparing the individually registered USB.'
             if (-not $Record.AllowErase) { throw 'This drive was not individually enrolled for automatic erasure.' }
-            if ($receipt) { Write-MRIJson (Join-Path $WorkPath 'previous-receipt.json') $receipt; [IO.File]::Delete($ReceiptPath); $receipt=$null }
+            if ($receipt) { Write-MRIJson (Join-Path $WorkPath 'previous-receipt.json') $receipt }
+            # A failed fresh build must never leave a stale READY receipt.
+            if ([IO.File]::Exists($ReceiptPath)) { [IO.File]::Delete($ReceiptPath) }; $receipt=$null
             $target=Initialize-MRITarget $Record $Config $ProtectedKeys $number $CancelPath
         } else {
             # Copy-only mode never overwrites nonempty media for a different source/recipe.

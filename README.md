@@ -1,84 +1,42 @@
 # MRI Drive Maker
 
-[Download v0.3.0](https://github.com/Cucklord420/MRI-Drive-Maker/raw/refs/heads/main/downloads/MRI-Drive-Maker-v0.3.0.zip). Extract the whole ZIP, then right-click **START-MRI-DRIVE-MAKER.cmd** and choose **Run as administrator**. It is the only launcher at the top of the download. `App/` contains the editable program and tests; `Developer/` contains historical source and validation records.
+[Download v0.3.0](https://github.com/Cucklord420/MRI-Drive-Maker/raw/refs/heads/main/downloads/MRI-Drive-Maker-v0.3.0.zip). Extract the whole ZIP, then right-click **START-MRI-DRIVE-MAKER.cmd → Run as administrator**. This is the only launcher you need.
 
-Choose the current authorized MRI ISO once, register the intended physical USB drives once, then leave the watcher running as you connect successive groups of drives. The program mounts an ISO read-only, copies its contained files, verifies every copied file, flushes writes, and reports each drive's result. A ZIP containing the extracted files or one ISO, and an already-extracted folder, are also supported. No media-creation batch is required for this workflow.
+Lists USBs, cleans the drives you select, formats them as FAT32, and copies your source folder's contents directly to each USB root. Several drives build at once. No BDE utility or setup batch is required.
 
-This is an independent, GPL-3.0-only media builder based on [JStone21/MRI-Creation](https://github.com/JStone21/MRI-Creation), upstream commit `aa7bdc528eb95952be3c95710e277025b3eea5be` dated 12-03-2023. It is not affiliated with or endorsed by Best Buy or Geek Squad. **The proprietary MRI payload and BDE-to-USB utility are not included.** This builder has not been shown to reproduce every operation of BDE-to-USB. Actual MRI booting, Secure Boot, and legacy BIOS compatibility remain unverified.
+## Use it
 
-## What to open and select
+1. Choose **1** and select the extracted MRI folder. Select the folder whose contents should appear at the USB root. An actual ISO or ZIP file is also supported.
+2. Choose **2**, check the displayed USB models, serials and disk numbers, then enter the intended numbers separated by commas.
+3. Type the displayed confirmation, for example **ERASE 6,7,8**. **This deletes all files and partitions on those selected USBs.** Approval applies only to this batch; registration is unnecessary.
+4. Leave the drives connected until **READY**. The batch finishes after every selected drive succeeds or fails. Use Windows **Safely Remove Hardware** before unplugging.
 
-1. Extract the ZIP to a separate folder on the workstation's internal NTFS drive. Open **START-MRI-DRIVE-MAKER.cmd**, using **Run as administrator**. It uses Windows PowerShell 5.1 and process-scoped RemoteSigned; enforced signing policy still applies.
-2. Choose **1 Choose MRI ISO / ZIP / extracted folder** and select the official source. For a normal ISO, select the `.iso` file directly; no manual extraction is needed. Empty sources and files exceeding FAT32's limit are rejected before a USB is written. Required filenames are optional rather than an assumption about your source.
-3. Choose copy mode for already-empty FAT32 drives, or prepare mode to create an active MBR/FAT32 partition. Prepare mode requires separate erase authorization when registering each drive. It uses up to 32,000,000,000 bytes; additional drive capacity remains unused.
-4. Choose **2 Register USB drives**. Match the displayed model, capacity, and hardware serial to each intended physical USB. Select their disk numbers and type the displayed confirmation for each. Label the physical drives with their assigned MRI labels. Registration changes no drive contents. Register drives in groups if necessary.
-5. Choose **4 Watch and build**. Plug in registered drives. New configurations run four builds concurrently, adjustable from **1 through 30** with menu option **5 Set simultaneous builds** before the next session. Existing limits are preserved. Active/waiting/completed counts are shown. Leave each connected until READY, then use Windows **Safely Remove Hardware** before unplugging it. Press **Q** to stop the watcher and cancel unfinished builds.
+New configurations allow **4 simultaneous builds**. Choose **4** in the menu to set **1–30**; existing saved limits are preserved. Remaining selected drives wait for a slot. Shared hubs and USB controllers share bandwidth, so 30 slots is not a measured 30-drive speedup. Press **Q** during a session to cancel unfinished builds.
 
-In the download, the root folder contains the launcher and guide. Configuration and `Data/` are created beside that launcher. Supporting `.ps1` files inside `App/` are source files; the old launchers are retained as non-executable text under `Developer/compatibility/`. In a Git checkout the same launcher uses the root source files.
+The download contains the launcher, this quick guide, license/notices, and editable source/tests inside **App/**. Configuration and **Data/** are created beside the launcher. Historical launchers and test reports stay in this repository, outside the download.
 
-For the requested workflow, enable preparation: registered intended USBs are cleaned/prepared as FAT32 and the source contents are copied directly to each root. Remaining attached drives wait for a slot; all 30 need not be attached together. Direct-copy preparation and copying work without assigning drive letters. Optional legacy setup batches still require letters and remain serialized by default. Shared USB bandwidth and available RAM/CPU limit useful concurrency; 30 slots does not mean a 30-fold speedup.
+## What happens to a drive
 
-## What READY verifies
+The selected batch cleans existing partitions, creates one active MBR/FAT32 partition using up to **32,000,000,000 bytes**, and copies the source contents to its root. Additional drive capacity remains unused. Each copied file is checked with SHA-256 after writes are flushed; failed or interrupted builds never receive a new success receipt. No report or marker is added to the USB.
 
-READY means the source and final copied files passed SHA-256 comparison, the configured required files exist and are nonempty, Windows accepted the write flush, and the registered USB's physical identity and volume mapping were checked again. With the default direct-copy recipe, no setup batch runs. **READY is a file verification result, not a firmware boot test.** Finding an EFI filename does not establish that its contents are a valid or compatible boot loader. This release focuses on copying the source's UEFI file tree; it does not install a separate legacy BIOS boot sector.
+Physical identity is checked again before storage operations. System/boot disks, source/application disks, non-USB disks, offline/write-protected disks, and missing or duplicate hardware serials are blocked. If a selected drive disappears or its disk number changes while waiting, its build fails rather than following another disk.
 
-A successful local receipt belongs to the physical drive and source recipe. Reinserting unchanged, previously verified media checks its contents again and reports ALREADY_READY without recopying. Source image length and modification time are checked during the session; changing the source requires restarting the watcher.
+Empty sources, files larger than FAT32 permits, insufficient capacity, unsafe paths, and source links/junctions are rejected. ISO files are mounted read-only; ZIP files use a temporary extraction cache. A selected folder's contents are copied exactly, without silently flattening a child directory.
 
-Direct mode checks copied paths/sizes, flushes writes, then hashes every target file once and requires an exact source match with no extra files. Legacy batch recipes still hash before executing the batch and again afterward. Hashing is chunked so cancellation/identity checks can run inside large files. Concurrency, polling, timeouts and setup serialization do not invalidate a current media receipt. Matching old direct-copy receipts migrate after full verification; prepare-mode migration also checks active MBR layout.
+## Automatic watcher and compatibility
 
-## Drive protection and recovery
+**A Advanced** retains registration and continuous watching for successive groups of drives. That mode ignores unregistered USBs and refuses unexpected existing files even on erase-enabled drives. It does not inherit the selected batch's one-time erase approval. Verified unchanged watcher media can report **ALREADY_READY** without copying again.
 
-Unknown USBs are ignored. Boot/system, offline, read-only, non-USB, source, and automation disks are excluded. Hardware identity combines the serial, PNP identity, model, and capacity; blank or duplicate serials are rejected. Capacity limits alone never authorize a write. Before destructive operations, fresh Storage and Win32_DiskDrive objects are matched to the registration; operations use the bound storage object rather than a stale disk number. Cancellation is checked before preparation, including on unpartitioned drives.
+Existing command-line actions and optional setup-batch recipes remain available. See [advanced settings](docs/ADVANCED.md), [source review](docs/SOURCE-REVIEW.md), and [validation](VALIDATION.txt). Old launcher aliases are archived as non-executable text under `legacy/compatibility/`.
 
-Both copy and preparation reject unexpected files. Existing files are accepted only when they match this tool's previous successful local receipt. Client files, modified files, or an unrecognized nonempty drive block processing before erasure. A failed partial build gets no new success receipt and is not retried repeatedly while attached. Inspect and reset that USB through the normal authorized process before retrying. Removing `Data/` removes registrations and receipts; nonempty drives will then require inspection/reset.
+## Validation, license and cost
 
-Keep drives connected throughout a build. Polling and cancellation cannot make unplugging during storage operations safe. Logs, manifests, state, and receipts stay in the workstation's `Data/`; the tool adds no marker or report files to the MRI USB. Links and junctions in source/target paths are rejected. ZIP extraction rejects traversal paths, duplicate names, symbolic links, and oversized archives, and uses an isolated cache removed when the source closes. ISO mounts created by the tool are removed when it finishes; existing user mounts are preserved.
+Windows CI checks real entry points, selection/confirmation, simulated failures, ISO mounting, native process cancellation, and FAT32/copy/hash operations on owned disposable virtual disks. Four actual copy-worker lifetimes overlap in the concurrency test. The selected-batch check also cleans existing multi-partition contents and ends without writing permanent erase registrations. See [Actions](https://github.com/Cucklord420/MRI-Drive-Maker/actions) for results tied to source revisions.
 
-## Settings and optional batch compatibility
+**READY verifies copied files; it does not establish MRI bootability.** Physical USB throughput, firmware booting and exact BDE-to-USB equivalence have not been tested. No proprietary MRI files or BDE program are included.
 
-Runtime configuration, source manifests and native copy plans are hashed from the parent's in-memory serialized data; each child reads once and checks its expected hash before use. Modified runtime plans cannot redirect the copy. Windows device aliases such as CON/NUL are rejected in source/archive paths. These checks do not protect against an administrator, modified program source, a malicious optional batch, or changes to the initial trusted configuration/registry. Use trusted source and program files; this is not a sandbox for untrusted administrative code.
+Based on [JStone21/MRI-Creation](https://github.com/JStone21/MRI-Creation), upstream revision `aa7bdc528eb95952be3c95710e277025b3eea5be` (12-03-2023). Original V3/V4 bytes remain in `legacy/`. The unchanged [LICENSE](LICENSE) is **GPL-3.0-only**; [NOTICE.md](NOTICE.md) records modifications. No affiliation with Best Buy or Geek Squad is claimed.
 
-The menu creates `mri-config.json`. The complete example is in `App/mri-config.example.json` in the download and at the repository root. Restart the watcher after changing settings.
-
-| Setting | Default and purpose |
-| --- | --- |
-| `SourceKind` / `SourcePath` | `Folder`, `ISO`, or `ZIP`, and the selected source path. The menu chooses the type. Older configurations without `SourceKind` remain folder recipes. |
-| `SetupBatch` | Empty: copy and verify only. Advanced compatibility recipes may specify a real relative `.bat`/`.cmd` media-preparation path. |
-| `RequiredFiles` | Empty. Optional configured required files must be present/nonempty in direct-copy sources before writing. |
-| `PrepareDisk` | False. True requires each drive's erase registration and prepares active MBR/FAT32. |
-| `MaxParallel` | 4 for new configurations; permitted range 1–30. Existing limits are preserved; menu 5 changes them. |
-| `PollSeconds` / `StablePolls` | 2 / 3. Registered drives must remain visible across three inventories before queuing. |
-| `MinimumDiskBytes` / `MaximumDiskBytes` | 4,000,000,000 / 2,000,000,000,000. Extra checks, not authorization. |
-| `CopyTimeoutSeconds` / `SetupTimeoutSeconds` | 3600 / 900. Timeouts stop the contained command tree and fail the drive. |
-| `SetupArguments` / `MutableFiles` / `SetupInteractive` | Empty / empty / false. Only optional batch recipes may use these; direct-copy mode rejects them. |
-| `SerializeSetup` | True. Optional batch processes run one at a time. Copies remain parallel. |
-
-A FAT32 file cannot exceed 4,294,967,295 bytes. Oversized files, insufficient free space, and any nonzero copy-worker exit are rejected; a zero exit still requires full file verification. Sources with oversized files need an appropriate official media recipe rather than an invented split operation.
-
-For advanced batch recipes, a zero exit code and completion of the normal descendant process tree are also required. A batch must target its USB working directory or an explicit supported argument; `{DriveLetter}`, `{DriveRoot}`, `{DiskNumber}`, and `{Label}` placeholders are available. Commands with shell metacharacters are rejected. The builder cannot infer the target of an arbitrary batch, detect a false internal success code, or contain work launched through services/WMI/scheduled tasks. A batch that repartitions or changes drive letters during setup is unsupported because the volume mapping guard stops it.
-
-## Validation and limitations
-
-The v0.3.0 checks include a 30-drive simulated queue and all previous safety/compatibility cases. `tests/WindowsConcurrencySmoke.ps1` uses four explicitly owned disposable VHDs to exercise the actual job launcher, preparation orchestration, FAT32 formatting, native copy processes, volume-GUID writes, hashes, flushes, and reinsertion. USB classification is simulated and the destructive guard is bound only to newly created file-backed fixtures. A barrier injected solely into temporary test copies proves that four actual copy-worker process lifetimes overlap. This is not a physical 30-USB throughput benchmark. Current results are in [VALIDATION.txt](VALIDATION.txt) and [GitHub Actions](https://github.com/Cucklord420/MRI-Drive-Maker/actions).
-
-On 10-14-2026 the tested runtime passed eight startup checks, 56 simulated build cases, ten source/identity checks, two native process checks, and eight real owned ISO/VHD checks on Windows PowerShell 5.1.26100.33438 / Windows Server 2025. [Windows run](https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38510584392). Current checks and evidence are recorded in [VALIDATION.txt](VALIDATION.txt) and [GitHub Actions](https://github.com/Cucklord420/MRI-Drive-Maker/actions). The v0.2.0 audit adds direct-copy, cancellation-before-formatting, source archive, storage-object identity, package-layout, and actual packaged launcher regressions. The Windows storage smoke test creates its own temporary ISO and file-backed VHD, then exercises real ISO mounting, Storage cmdlets, FAT32 volume GUID paths, the actual Windows file-copy worker, hashing, native process handling, and flushing. Only USB classification is simulated for the owned VHD; the destructive guard must still reject that non-USB disk.
-
-`tests/SelfTest.ps1` uses temporary files with simulated storage/process APIs. `tests/SourceSmoke.ps1` uses temporary archive and disk-identity fixtures. `tests/StartupSmoke.ps1` launches real child processes from an unrelated working directory; only menu input in an isolated copy is mocked to Q. `tests/PackageSmoke.ps1` verifies the actual ZIP hashes/layout and launches its top-level CMD file on Windows. `tests/WindowsProcessSmoke.ps1` checks real descendant completion/cancellation. `tests/WindowsStorageSmoke.ps1` formats only its newly created, explicitly checked file-backed fixture, never an attached physical USB.
-
-Historical 10-10-2026 validation completed 100 simulated runs with 48 tests each: 4,800 passes. The 10-13-2026 v0.1.1 fix passed eight Windows startup checks, 48 simulated cases, and two real process checks. Those historical results apply to their recorded source revisions and do not establish v0.2.0 or physical MRI bootability. The original suite missed the parameter-binding startup error because it imported the module directly instead of launching the app with `powershell.exe -File`.
-
-No actual MRI image, BDE-to-USB executable, physical USB, Windows 10/11 workstation, or firmware boot test is available in this test environment. There is no measured estimate for preparing 30 drives. The source download includes complete editable source, tests, attribution, historical evidence, and a portable Git history bundle.
-
-## License and cost
-
-The entire modified project is **GPL-3.0-only**. The complete upstream [LICENSE](LICENSE) is unchanged. [NOTICE.md](NOTICE.md) preserves original authorship and dated modification notices; original V3/V4 sources remain verbatim as text under `legacy/`. No extra license restrictions are imposed.
-
-Use only source files and drives you are authorized to use. This distribution contains no proprietary MRI files, internal company documents, store credentials, or BDE-to-USB program.
-
-**Additional TCO:** $0 in software or subscription charges with the existing workstation and USBs. Hardware, electricity, and staff time vary; new hubs or drives are not required by this program. Verification adds reads and depends on shared USB bandwidth.
+**Additional TCO:** $0 software/subscription fees using the existing workstation and USBs. Staff time, electricity and hardware costs vary.
 
 Sources: JStone21 — 12-03-2023 — https://github.com/JStone21/MRI-Creation
-
-Sources: Microsoft — 06-14-2023 — https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/install-windows-from-a-usb-flash-drive?view=windows-11
-
-Sources reviewed 10-14-2026: Microsoft Storage cmdlet documentation — https://learn.microsoft.com/en-us/powershell/module/storage/mount-diskimage?view=windowsserver2025-ps and https://learn.microsoft.com/en-us/powershell/module/storage/new-partition?view=windowsserver2025-ps

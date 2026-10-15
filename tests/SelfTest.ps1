@@ -102,6 +102,22 @@ function Build { param([string[]]$Protected=@(),$Record=$record)
     Invoke-MRIBuild $Record $cfg $manifest $Protected $state $receipt (Join-Path $caseRoot 'Logs') $cancel
 }
 try {
+    Test 'Selected erase approval permits cleaning existing files only for the confirmed disk number' {
+        Reset-Case; $cfg.PrepareDisk=$true; $cfg.SetupBatch=''
+        [IO.File]::WriteAllText((Join-Path $sim.TargetRoot 'old.txt'),'owned old content')
+        $result=Invoke-MRIBuild $record $cfg $manifest @() $state $receipt (Join-Path $caseRoot 'Logs') $cancel -ApprovedEraseNumber 6
+        Check ($result.Success -and $sim.FormatCalls -eq 1 -and -not [IO.File]::Exists((Join-Path $sim.TargetRoot 'old.txt')))
+    }
+    Test 'Selected erase approval rejects a changed disk number before preparation' {
+        Reset-Case; $cfg.PrepareDisk=$true; $cfg.SetupBatch=''
+        $result=Invoke-MRIBuild $record $cfg $manifest @() $state $receipt (Join-Path $caseRoot 'Logs') $cancel -ApprovedEraseNumber 7
+        Check (-not $result.Success -and $sim.FormatCalls -eq 0 -and $sim.CopyCalls -eq 0)
+    }
+    Test 'Selected erase approval cannot bypass a protected source disk' {
+        Reset-Case; $cfg.PrepareDisk=$true; $cfg.SetupBatch=''
+        $result=Invoke-MRIBuild $record $cfg $manifest @($record.Key) $state $receipt (Join-Path $caseRoot 'Logs') $cancel -ApprovedEraseNumber 6
+        Check (-not $result.Success -and $sim.FormatCalls -eq 0)
+    }
     Test 'PowerShell files parse without errors' {
         foreach ($f in @(Get-ChildItem $root -Include *.ps1,*.psm1 -Recurse)) {
             $errors=$null; $tokens=$null

@@ -138,6 +138,49 @@ Export-ModuleMember -Function *-MRI*
     $code=Invoke-MRICommand (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe') $argsLine $temp $log 20 { } -CancelPath (Join-Path $temp 'cancel')
     Check ($code -ne 0 -and [IO.File]::ReadAllText($log).Contains('changed or is corrupt'))
     Pass 'The actual copy worker rejects a redirected plan before touching its target'
+    # Exercise the actual finite menu-2 path as well as the lower-level jobs.
+    # Give the first owned VHD two existing NTFS partitions with sentinel files.
+    $fixture=$fixtures[0]
+    $owned=Get-MRIWritableDisk $fixture.Record $cfg @() $fixture.Drive.Number ''
+    Clear-Disk -InputObject $owned -RemoveData -RemoveOEM -Confirm:$false -ErrorAction Stop
+    $owned=Get-MRIWritableDisk $fixture.Record $cfg @() $fixture.Drive.Number ''
+    if ([string]$owned.PartitionStyle -eq 'RAW') { $owned=Initialize-Disk -InputObject $owned -PartitionStyle MBR -PassThru -ErrorAction Stop }
+    foreach ($index in 1..2) {
+        $part=New-Partition -InputObject $owned -Size 64MB -ErrorAction Stop
+        $volume=$part | Format-Volume -FileSystem NTFS -Force -Confirm:$false -ErrorAction Stop
+        [IO.File]::WriteAllText((Join-MRIPath $volume.Path ('old-'+$index+'.txt')),'owned disposable contents')
+    }
+    Copy-Item -LiteralPath (Join-Path $root 'MRI-Batch.ps1') -Destination $app
+    Copy-Item -LiteralPath (Join-Path $root 'mri-config.example.json') -Destination $app
+    Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $app
+    [IO.File]::AppendAllText($modulePath,@'
+
+function Read-Host {
+    param([string]$Prompt)
+    $numbers=($script:OwnedFixtures.Drive.Number | Sort-Object) -join ','
+    if ($Prompt -like 'Disk numbers to clean*') { return $numbers }
+    if ($Prompt -like 'Type*') { return 'ERASE '+$numbers }
+    throw ('Unexpected operator prompt: '+$Prompt)
+}
+Export-ModuleMember -Function '*-MRI*','Read-Host'
+'@)
+    $beforeConfig=(Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
+    $batchData=Join-Path $temp 'Selected batch data'
+    $arguments=(@('-NoLogo','-NoProfile','-ExecutionPolicy','RemoteSigned','-File',(Join-Path $app 'MRI-Batch.ps1'),
+        '-Action','Build','-ConfigPath',$configPath,'-DataPath',$batchData) | ForEach-Object { [MRIBatch.NativeProcess]::Quote($_) }) -join ' '
+    $batchLog=Join-Path $temp 'selected-batch.log'
+    $code=Invoke-MRICommand (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe') $arguments $temp $batchLog 150 { } -CancelPath (Join-Path $temp 'cancel')
+    $output=[IO.File]::ReadAllText($batchLog)
+    if ($code -ne 0 -or -not $output.Contains('Batch finished: 4/4 verified; 0 failed or cancelled.')) { throw "Selected batch failed or did not finish: $output" }
+    Check (-not [IO.File]::Exists((Join-Path $batchData 'drives.json'))) 'Selected builds must not create permanent erase registrations.'
+    Check ((Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash -eq $beforeConfig)
+    foreach ($fixture in $fixtures) {
+        $target=Get-MRITargetVolume $fixture.Drive -RequireDriveLetter $false
+        Check ($target.FileSystem -eq 'FAT32' -and -not $target.Letter)
+        $actual=Get-MRIManifest $target.Path -IgnoreSystemDirectories
+        Assert-MRIManifestMatch $manifest $actual -Exact
+    }
+    Pass 'The real selected batch cleans existing multi-partition contents, builds four USB fixtures and exits without permanent approvals'
     Write-Host "`n$checks/$checks parallel Windows storage checks passed. Only owned VHD fixtures were modified."
 } finally {
     try {
