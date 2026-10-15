@@ -24,7 +24,10 @@ function Drive {
 }
 try {
     $cfg=Read-MRIJson (Join-Path $root 'mri-config.example.json')
-    $cfg.SourcePath=$temp; $cfg.SourceKind='Folder'
+    $source=Join-Path $temp 'Source'
+    [void][IO.Directory]::CreateDirectory($source)
+    [IO.File]::WriteAllText((Join-Path $source 'payload.txt'),'owned source')
+    $cfg.SourcePath=$source; $cfg.SourceKind='Folder'
     $inventory=@((Drive 6 'A'),(Drive 7 'B'),(Drive 8 'C'))
     Check (@(Select-MRIUsbDrives ' 7,6,7 ' $inventory $cfg).Count -eq 2)
     Check (@(Select-MRIUsbDrives '' $inventory $cfg).Count -eq 0)
@@ -76,11 +79,23 @@ try {
     Check ($script:Captured[1].Key -eq $inventory[0].Key -and $script:Captured[1].AllowErase)
     Check (-not [IO.Directory]::Exists($DataPath))
     Pass 'Exact list confirmation creates only session approvals and writes no registrations'
+    $approved=$script:Captured[1]
     $script:Captured=@(); $script:SwapOnConfirm=$true
     $script:Answers.Enqueue('6'); $script:Answers.Enqueue('ERASE 6')
     Throws { Build-SelectedMedia }
     Check ($script:Captured.Count -eq 0)
     Pass 'A USB replaced during confirmation cannot reach the batch runner'
+    # A selected USB that disappears before its slot must end the finite
+    # batch, record failure, and make the actual runner report failure.
+    $definition=$ast.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Watch-Media'},$false)
+    . ([scriptblock]::Create($definition.Extent.Text))
+    $script:LiveInventory=@()
+    Throws { Watch-Media -SessionRecords @($approved) }
+    $summaries=@(Get-ChildItem -LiteralPath $DataPath -Filter summary.json -Recurse)
+    Check ($summaries.Count -eq 1)
+    $summary=Read-MRIJson $summaries[0].FullName
+    Check (@($summary.Failed).Count -eq 1 -and @($summary.Verified).Count -eq 0)
+    Pass 'A missing selected USB ends the finite batch with a failed result'
     Write-Host "$checks/$checks selection checks passed."
 } finally { Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue }
 exit 0

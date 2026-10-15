@@ -84,8 +84,9 @@ function Configure-Media {
     Write-Host 'Source saved. Choose 2 to select USBs and build.'
 }
 function Show-Drives {
+    param([array]$Inventory)
     Assert-WindowsAdmin
-    $inventory=@(Get-MRIInventory)
+    if ($null -eq $Inventory) { $Inventory=@(Get-MRIInventory) }
     if (-not $inventory.Count) { Write-Host 'No USB disks detected.'; return }
     $inventory | ForEach-Object {
         $d=$_
@@ -99,7 +100,7 @@ function Build-SelectedMedia {
     $cfg=Get-Config
     $inventory=@(Get-MRIInventory)
     $protected=@(Get-MRIProtectedKeys @($cfg.SourcePath,$PSScriptRoot,$DataPath) $inventory)
-    Show-Drives
+    Show-Drives -Inventory $inventory
     $selected=@(Select-MRIUsbDrives (Read-Host 'Disk numbers to clean and build, separated by commas (blank cancels)') $inventory $cfg $protected)
     if (-not $selected.Count) { return }
     $selected | Select-Object Number,Model,Serial,@{Name='GB';Expression={[Math]::Round($_.Size/1e9,1)}} | Format-Table -AutoSize | Out-Host
@@ -121,7 +122,7 @@ function Enroll-Drives {
     $cfg=Get-Config
     $records=@(Get-Records); $inventory=@(Get-MRIInventory)
     $protected=@(Get-MRIProtectedKeys @($cfg.SourcePath,$PSScriptRoot,$DataPath) $inventory)
-    Show-Drives
+    Show-Drives -Inventory $inventory
     Write-Host 'Select only the company MRI USB drives shown above. Unknown drives are never automatically enrolled.'
     $selection=Read-Host 'Disk numbers to register, separated by commas (blank cancels)'
     if (-not $selection) { return }
@@ -305,6 +306,7 @@ function Watch-Media {
             }
         }
     }
+    if ($once -and $failed.Count) { throw "Batch failed or cancelled for $($failed.Count) selected USB(s). See the per-drive results above." }
 }
 function Show-AdvancedMenu {
     Write-Host '1 Register USBs for automatic watching'
