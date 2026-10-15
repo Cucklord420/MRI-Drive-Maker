@@ -5,6 +5,7 @@ on:
       - 'rust/mri-safety/**'
       - 'MRI.Batch.psm1'
       - 'tests/RustSelectionParity.ps1'
+      - 'tests/RustHardwareIdentityParity.ps1'
       - '.github/workflows/rust-safety.yml'
   pull_request:
   workflow_dispatch:
@@ -28,3 +29,6 @@ jobs:
       - name: Compare Rust to original PowerShell with disposable inventories
         shell: powershell
         run: ./tests/RustSelectionParity.ps1
+      - name: Compare Rust hardware identity to original PowerShell across 113 fixtures
+        shell: powershell
+        run: ./tests/RustHardwareIdentityParity.ps1
