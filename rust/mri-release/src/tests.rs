@@ -44,8 +44,10 @@ fn python_release_zip_has_exact_same_entries_and_manifest_contents(){
     if raw_python != raw_rust {
         let offset=raw_python.iter().zip(raw_rust.iter()).position(|(a,b)|a!=b)
             .unwrap_or(raw_python.len().min(raw_rust.len()));
-        panic!("ZIP binary parity differs at byte {offset}; Python bytes={}, Rust bytes={}",
-            raw_python.len(),raw_rust.len());
+        let start=offset.saturating_sub(16);
+        let end=(offset+32).min(raw_python.len()).min(raw_rust.len());
+        panic!("ZIP binary parity differs at byte {offset}; Python bytes={}, Rust bytes={}; Python window {:02x?}; Rust window {:02x?}",
+            raw_python.len(),raw_rust.len(),&raw_python[start..end],&raw_rust[start..end]);
     }
     assert_eq!(verify(&repo_root(),&rust).unwrap(),new);
     let py_original_verified=python_builder(&["--verify",rust.to_str().unwrap()]);
