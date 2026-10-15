@@ -22,8 +22,14 @@ function Test-Parity {
         MinimumDiskBytes=$cfg.MinimumDiskBytes;MaximumDiskBytes=$cfg.MaximumDiskBytes
     }
     $json=ConvertTo-Json -InputObject $inputObject -Depth 10 -Compress
-    $resultJson=$json | & $executable
-    $nativeExit=$LASTEXITCODE
+    $fixture=Join-Path $env:TEMP ([guid]::NewGuid().ToString('N')+'.json')
+    try {
+        [System.IO.File]::WriteAllText($fixture,$json,[System.Text.UTF8Encoding]::new($false))
+        $resultJson=& $executable --input-file $fixture
+        $nativeExit=$LASTEXITCODE
+    } finally {
+        Remove-Item -LiteralPath $fixture -Force -ErrorAction SilentlyContinue
+    }
     if (-not $resultJson) { throw 'Rust returned no JSON.' }
     $rust=$resultJson | ConvertFrom-Json
     $originalError=$null
