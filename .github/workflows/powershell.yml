@@ -8,8 +8,10 @@ on:
       - '**/*.cs'
       - '**/*.cmd'
       - 'mri-config.example.json'
-      - 'scripts/Build-Download.py'
-      - 'downloads/MRI-Drive-Maker-v*.zip'
+      - 'tests/**'
+      - 'scripts/**'
+      - 'downloads/SHA256SUMS.txt'
+      - 'downloads/MRI-Drive-Maker-*.zip'
       - '.github/workflows/powershell.yml'
   pull_request:
   workflow_dispatch:
