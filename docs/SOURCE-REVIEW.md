@@ -25,4 +25,4 @@ Validation uses owned temporary virtual disks, not physical store USBs. It canno
 
 Sources: JStone21 — 12-03-2023 — https://github.com/JStone21/MRI-Creation/tree/aa7bdc528eb95952be3c95710e277025b3eea5be
 
-Windows validation passed on 10-15-2026 for source `d4845eee4258ab9d97fd6e21870e50efd8bdedf7`: [run 38744175367](https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38744175367). The 250,558-byte candidate download matches the reproducible builder exactly. Selection tests include finite-batch failure reporting. Evidence and limitations are recorded under `validation/cleanup-10-15-2026/`.
+Windows validation passed on 10-15-2026 for source `fdd5be8c1760454c82252e5ccf562e65a54e7806`: [run 38745234537](https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38745234537). The 252,018-byte candidate download matches the reproducible builder exactly. Its launcher and shipped startup/build suite also pass from the extracted package. Selection tests include finite-batch failure reporting. Evidence and limitations are recorded under `validation/cleanup-10-15-2026/`.

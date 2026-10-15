@@ -1,12 +1,12 @@
 10-15-2026 — source-guided v0.3.0 cleanup
 ===========================================
-Source: d4845eee4258ab9d97fd6e21870e50efd8bdedf7
-Windows: https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38744175367
-Static analysis: https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38744181354
+Source: fdd5be8c1760454c82252e5ccf562e65a54e7806
+Windows: https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38745234537
+Static analysis: https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38745245979
 Windows Server 2025; Windows PowerShell 5.1.26100.33438.
 PASS: 67 simulated build cases, 6 real startup checks, 7 selection/consent
 checks, 15 source checks, 2 native process checks, 8 owned ISO/VHD checks,
-6 concurrent storage checks and 2 candidate-package checks.
+6 concurrent storage checks and 3 candidate-package checks.
 
 The four-worker test proves actual copy-process overlap. Its selected-batch
 case runs the real -Action Build path, cleans existing NTFS partitions,
@@ -17,11 +17,14 @@ so the main command-line handler returns a nonzero exit code.
 VHD classification is overridden only in temporary tests.
 
 Archive: downloads/MRI-Drive-Maker-v0.3.0.zip
-SHA256: 9b4c6bcb9b16a982c46e2becbe455de463046a6467ed80ddc314d7f8e6fc1194
-Bytes: 250558; files: 20; one top-level launcher.
+SHA256: f867a8c76ebd14087f3110803430b12ba34b7b4610241a3b886ea80c113c2fb0
+Bytes: 252018; files: 20; one top-level launcher.
 Archive bytes match the Python CI builder's output exactly. Every file is
 checked against its declared Git source origin and internal SHA256 hash.
-The committed archive is also checked in the final branch/PR CI run.
+The package check launches its actual top-level CMD and runs the shipped
+startup/build suite from the extracted App/tests directory. Its six checks
+all pass; nested repetitions are not added to the unique-case totals.
+The committed archive is checked again by the final branch/PR CI run.
 
 A prior trial failed in the new dynamically compiled test because that
 fixture had no file-based PSScriptRoot; the fixed test binds its app root
@@ -30,6 +33,7 @@ and identified in validation/cleanup-10-15-2026/results.json.
 
 Limits: no physical 30-USB benchmark, store Windows 10/11 host, actual MRI
 payload, BDE executable or firmware boot test. READY is file verification.
+No physical user USB or production system was changed during validation.
 
 The records below are historical and apply to their own source revisions.
 

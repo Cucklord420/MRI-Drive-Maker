@@ -1,5 +1,5 @@
-Source: d4845eee4258ab9d97fd6e21870e50efd8bdedf7
-Run: https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38744175367
+Source: fdd5be8c1760454c82252e5ccf562e65a54e7806
+Run: https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38745234537
 PASS Direct -File launch with default configuration from another folder
 PASS Direct -File launch accepts an explicit configuration path
 PASS Direct -File launch accepts an empty configuration path
@@ -52,5 +52,6 @@ PASS The real selected batch cleans existing multi-partition contents, builds fo
 6/6 parallel Windows storage checks passed. Only owned VHD fixtures were modified.
 PASS Packaged source hashes and the single obvious launcher are correct.
 PASS The actual packaged top-level launcher opens the selected-drive menu on Windows PowerShell 5.1.
+PASS The shipped startup/build regression suite runs successfully from the extracted download.
 
 Only owned temporary ISO/VHD fixtures were modified. USB classification is simulated for those explicitly bound fixtures; formatting, volume GUID copy workers, hashes, flushes, four-worker overlap and a finite selected batch use the real backend. No physical USB throughput or MRI firmware boot test.

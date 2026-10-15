@@ -1,9 +1,9 @@
 {
   "date": "10-15-2026",
-  "source_commit": "d4845eee4258ab9d97fd6e21870e50efd8bdedf7",
-  "windows_run": "https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38744175367",
-  "windows_job": 116453334908,
-  "static_analysis_run": "https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38744181354",
+  "source_commit": "fdd5be8c1760454c82252e5ccf562e65a54e7806",
+  "windows_run": "https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38745234537",
+  "windows_job": 116457028475,
+  "static_analysis_run": "https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38745245979",
   "counts": {
     "build_cases": 67,
     "startup": 6,
@@ -12,13 +12,13 @@
     "native_process": 2,
     "owned_iso_vhd": 8,
     "parallel_vhd": 6,
-    "package": 2
+    "package": 3
   },
   "platform": "Windows Server 2025; Windows PowerShell 5.1.26100.33438",
   "archive": {
     "path": "downloads/MRI-Drive-Maker-v0.3.0.zip",
-    "sha256": "9b4c6bcb9b16a982c46e2becbe455de463046a6467ed80ddc314d7f8e6fc1194",
-    "bytes": 250558,
+    "sha256": "f867a8c76ebd14087f3110803430b12ba34b7b4610241a3b886ea80c113c2fb0",
+    "bytes": 252018,
     "files": 20,
     "bit_identical_to_ci_builder": true
   },
@@ -26,5 +26,6 @@
     "run": "https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38743755268",
     "reason": "The new dynamically compiled finite-runner test had no file-based PSScriptRoot. The fixture now supplies its app root and asserts the intended failed-batch exception."
   },
-  "scope": "Only owned temporary ISO/VHD fixtures were modified. USB classification is simulated for those explicitly bound fixtures; formatting, volume GUID copy workers, hashes, flushes, four-worker overlap and a finite selected batch use the real backend. No physical USB throughput or MRI firmware boot test."
+  "scope": "Only owned temporary ISO/VHD fixtures were modified. USB classification is simulated for those explicitly bound fixtures; formatting, volume GUID copy workers, hashes, flushes, four-worker overlap and a finite selected batch use the real backend. No physical USB throughput or MRI firmware boot test.",
+  "packaged_startup_suite": "All six shipped startup checks, including the 67-case simulated suite and validation runner, pass when invoked from the extracted download."
 }
