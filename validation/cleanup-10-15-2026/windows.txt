@@ -1,5 +1,5 @@
-Source: 7cc27fd49389a453a92d94368f9e2fa138d7494a
-Run: https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38742906228
+Source: d4845eee4258ab9d97fd6e21870e50efd8bdedf7
+Run: https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38744175367
 PASS Direct -File launch with default configuration from another folder
 PASS Direct -File launch accepts an explicit configuration path
 PASS Direct -File launch accepts an empty configuration path
@@ -16,7 +16,8 @@ PASS Protected source/system disks and duplicate serials remain excluded
 PASS A generic yes does not confirm the displayed erase list
 PASS Exact list confirmation creates only session approvals and writes no registrations
 PASS A USB replaced during confirmation cannot reach the batch runner
-6/6 selection checks passed.
+PASS A missing selected USB ends the finite batch with a failed result
+7/7 selection checks passed.
 PASS Extracted source folders open without a setup batch
 PASS Single wrapper folders resolve to the actual boot-file root
 PASS A selected folder containing one child directory preserves that directory at the USB root
@@ -52,4 +53,4 @@ PASS The real selected batch cleans existing multi-partition contents, builds fo
 PASS Packaged source hashes and the single obvious launcher are correct.
 PASS The actual packaged top-level launcher opens the selected-drive menu on Windows PowerShell 5.1.
 
-Storage classification is simulated only for explicitly owned VHD fixtures. Real formatting, volume GUID copy workers, hashes, flushes, process overlap, and a finite selected batch are exercised. No physical USB throughput or MRI firmware boot test.
+Only owned temporary ISO/VHD fixtures were modified. USB classification is simulated for those explicitly bound fixtures; formatting, volume GUID copy workers, hashes, flushes, four-worker overlap and a finite selected batch use the real backend. No physical USB throughput or MRI firmware boot test.

@@ -1,26 +1,32 @@
 10-15-2026 — source-guided v0.3.0 cleanup
 ===========================================
-Source: 7cc27fd49389a453a92d94368f9e2fa138d7494a
-Windows: https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38742906228
+Source: d4845eee4258ab9d97fd6e21870e50efd8bdedf7
+Windows: https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38744175367
+Static analysis: https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38744181354
 Windows Server 2025; Windows PowerShell 5.1.26100.33438.
-PASS: 67 simulated build cases, 6 real startup checks, 6 selection/consent
+PASS: 67 simulated build cases, 6 real startup checks, 7 selection/consent
 checks, 15 source checks, 2 native process checks, 8 owned ISO/VHD checks,
 6 concurrent storage checks and 2 candidate-package checks.
-Static analysis passed on the identical runtime source before the CI-trigger-only
-merge: https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38742841929
 
 The four-worker test proves actual copy-process overlap. Its selected-batch
 case runs the real -Action Build path, cleans existing NTFS partitions,
 formats FAT32 and verifies root contents on four owned VHDs, exits, and
-does not create permanent erase registrations. Original physical USB guards
-remain in production; VHD classification is overridden only in temporary tests.
+does not create permanent erase registrations. A missing selected drive
+also ends the finite runner with a failure summary and a thrown failure,
+so the main command-line handler returns a nonzero exit code.
+VHD classification is overridden only in temporary tests.
 
 Archive: downloads/MRI-Drive-Maker-v0.3.0.zip
-SHA256: 3e9e19e6071a544fef96bcaba209f04e17c21741d8a0cd0e974a6777eefb7b9b
-Bytes: 249005; files: 20; one top-level launcher.
+SHA256: 9b4c6bcb9b16a982c46e2becbe455de463046a6467ed80ddc314d7f8e6fc1194
+Bytes: 250558; files: 20; one top-level launcher.
 Archive bytes match the Python CI builder's output exactly. Every file is
 checked against its declared Git source origin and internal SHA256 hash.
-The committed archive is also checked by the next branch/PR CI run.
+The committed archive is also checked in the final branch/PR CI run.
+
+A prior trial failed in the new dynamically compiled test because that
+fixture had no file-based PSScriptRoot; the fixed test binds its app root
+and asserts the intended failed-batch error. That trial is retained in CI
+and identified in validation/cleanup-10-15-2026/results.json.
 
 Limits: no physical 30-USB benchmark, store Windows 10/11 host, actual MRI
 payload, BDE executable or firmware boot test. READY is file verification.
