@@ -101,6 +101,48 @@ fn verify(repo: &Path, archive_path: &Path) -> Result<Manifest, String> {
     }
     Ok(manifest)
 }
+// zip-rs emits "version made by" 0x032E (46, Unix); Python zipfile
+// uses 0x0314 (20, Unix). For a byte-identical reproducible source ZIP,
+// normalize ONLY that central-directory metadata. Do not modify file payloads.
+fn normalize_zip_creator_version(path:&Path)->Result<(),String>{
+    let mut bytes=fs::read(path).map_err(|e|e.to_string())?;
+    if bytes.len()<22 {return Err("ZIP lacks end-of-central-directory record".into());}
+    let end=bytes.len()-22;
+    if bytes.get(end..end+4)!=Some(&b"PK\x05\x06"[..]){
+        return Err("Expected no ZIP comment or ZIP64 extensions".into());
+    }
+    let count=u16::from_le_bytes([bytes[end+10],bytes[end+11]]) as usize;
+    let expected_len=u32::from_le_bytes([
+        bytes[end+12],bytes[end+13],bytes[end+14],bytes[end+15]
+    ]) as usize;
+    let start=u32::from_le_bytes([
+        bytes[end+16],bytes[end+17],bytes[end+18],bytes[end+19]
+    ]) as usize;
+    if start> end || start.checked_add(expected_len)!=Some(end) {
+        return Err("Invalid ZIP central-directory bounds".into());
+    }
+    let mut cursor=start;
+    for _ in 0..count {
+        if cursor.checked_add(46).is_none_or(|v|v>end)
+            || bytes.get(cursor..cursor+4)!=Some(&b"PK\x01\x02"[..]) {
+            return Err("Invalid ZIP central-directory header".into());
+        }
+        if bytes[cursor+4]!=46 || bytes[cursor+5]!=3 {
+            return Err("Unexpected native ZIP creator platform/version".into());
+        }
+        bytes[cursor+4]=20; // Python zipfile: version made by 20
+        let filename_len=u16::from_le_bytes([bytes[cursor+28],bytes[cursor+29]]) as usize;
+        let extra_len=u16::from_le_bytes([bytes[cursor+30],bytes[cursor+31]]) as usize;
+        let comment_len=u16::from_le_bytes([bytes[cursor+32],bytes[cursor+33]]) as usize;
+        cursor=cursor.checked_add(46+filename_len+extra_len+comment_len)
+            .ok_or("ZIP central-directory length overflow")?;
+    }
+    if cursor!=end {return Err("ZIP central-directory entries do not match declared size".into());}
+    let mut output=OpenOptions::new().write(true).open(path).map_err(|e|e.to_string())?;
+    output.write_all(&bytes).map_err(|e|e.to_string())?;
+    output.flush().map_err(|e|e.to_string())
+}
+
 fn build(repo:&Path, path:&Path, version:&str)->Result<Manifest,String>{
     if !Regex::new(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,48}$").unwrap().is_match(version) {
         return Err("Version contains unsupported path characters".into());
@@ -171,6 +213,7 @@ fn build(repo:&Path, path:&Path, version:&str)->Result<Manifest,String>{
         zip.write_all(contents).map_err(|e|e.to_string())?;
     }
     zip.finish().map_err(|e|e.to_string())?;
+    normalize_zip_creator_version(path)?;
     let checked=verify(repo,path)?;
     if checked!=manifest {
         return Err("Release verification differs from original manifest".into());
