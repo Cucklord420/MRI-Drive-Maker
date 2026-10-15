@@ -62,7 +62,9 @@ try {
     foreach ($name in @('MRI-Batch.ps1','MRI.Batch.psm1','Copy-MRIFiles.ps1','NativeProcess.cs','mri-config.example.json','LICENSE')) {
         Copy-Item -LiteralPath (Join-Path $root $name) -Destination $app
     }
-    Copy-Item -LiteralPath (Join-Path $root 'START-MRI-DRIVE-MAKER.cmd') -Destination $app
+    $launcher=Join-Path $root 'START-MRI-DRIVE-MAKER.cmd'
+    if (-not [IO.File]::Exists($launcher)) { $launcher=Join-Path (Split-Path $root -Parent) 'START-MRI-DRIVE-MAKER.cmd' }
+    Copy-Item -LiteralPath $launcher -Destination $app
     Copy-Item -LiteralPath (Join-Path $root 'tests') -Destination $app -Recurse
     # Console input is a host capability, not part of the path regression.
     # Only the temporary copy exports a fixed Q response so headless Windows

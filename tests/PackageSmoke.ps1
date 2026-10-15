@@ -44,6 +44,21 @@ try {
             if ($process.ExitCode -ne 0 -or -not $output.Contains('Choose MRI folder') -or -not $output.Contains('Set simultaneous builds') -or -not $output.Contains('Clean, format FAT32 and copy to selected USBs')) { throw "Packaged launcher failed: $output" }
             Write-Host 'PASS The actual packaged top-level launcher opens the selected-drive menu on Windows PowerShell 5.1.'
         } finally { $process.Dispose() }
+        # Run the shipped startup suite from its actual App/tests location.
+        # This checks that developer source in the distribution resolves the
+        # single parent launcher as well as working in a Git checkout.
+        $start.FileName=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+        $start.Arguments='-NoLogo -NoProfile -ExecutionPolicy RemoteSigned -File "'+(Join-Path $package 'App/tests/StartupSmoke.ps1')+'"'
+        $process=[Diagnostics.Process]::new(); $process.StartInfo=$start
+        try {
+            [void]$process.Start()
+            $stdout=$process.StandardOutput.ReadToEndAsync(); $stderr=$process.StandardError.ReadToEndAsync()
+            $process.StandardInput.Close()
+            if (-not $process.WaitForExit(120000)) { & (Join-Path $env:SystemRoot 'System32/taskkill.exe') /PID $process.Id /T /F | Out-Null; throw 'Packaged startup suite timed out.' }
+            $output=$stdout.GetAwaiter().GetResult()+$stderr.GetAwaiter().GetResult()
+            if ($process.ExitCode -ne 0 -or -not $output.Contains('6/6 startup tests passed.')) { throw "Packaged startup suite failed: $output" }
+            Write-Host 'PASS The shipped startup/build regression suite runs successfully from the extracted download.'
+        } finally { $process.Dispose() }
     }
 } finally { Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue }
 exit 0
