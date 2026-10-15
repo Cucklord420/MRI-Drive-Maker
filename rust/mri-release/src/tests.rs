@@ -39,6 +39,14 @@ fn python_release_zip_has_exact_same_entries_and_manifest_contents(){
     let rust_entries=members(&rust);
     assert_eq!(py_entries.len(),rust_entries.len());
     assert_eq!(py_entries,rust_entries,"ZIP members, timestamps or metadata differ");
+    let raw_python=fs::read(&py).unwrap();
+    let raw_rust=fs::read(&rust).unwrap();
+    if raw_python != raw_rust {
+        let offset=raw_python.iter().zip(raw_rust.iter()).position(|(a,b)|a!=b)
+            .unwrap_or(raw_python.len().min(raw_rust.len()));
+        panic!("ZIP binary parity differs at byte {offset}; Python bytes={}, Rust bytes={}",
+            raw_python.len(),raw_rust.len());
+    }
     assert_eq!(verify(&repo_root(),&rust).unwrap(),new);
     let py_original_verified=python_builder(&["--verify",rust.to_str().unwrap()]);
     assert_eq!(py_original_verified["source_commit"],new.source_commit);
