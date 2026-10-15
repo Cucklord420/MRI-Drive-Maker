@@ -29,6 +29,18 @@ Empty sources, files larger than FAT32 permits, insufficient capacity, unsafe pa
 
 Existing command-line actions and optional setup-batch recipes remain available. See [advanced settings](docs/ADVANCED.md), [source review](docs/SOURCE-REVIEW.md), and [validation](VALIDATION.txt). Old launcher aliases are archived as non-executable text under `legacy/compatibility/`.
 
+## Rust source-release generator
+
+The candidate download is generated and verified by Rust directly from the pinned Git revision:
+
+```text
+cargo test --manifest-path rust/mri-release/Cargo.toml
+cargo run --manifest-path rust/mri-release/Cargo.toml -- --output candidate.zip
+cargo run --manifest-path rust/mri-release/Cargo.toml -- --verify candidate.zip
+```
+
+The original Python packager is retained only as a differential reference. CI requires **byte-for-byte identical ZIPs**, including the release manifest and central-directory metadata, and opens the real Rust-generated download on Windows using the shipped launcher and startup tests. The existing published v0.3.0 download is not automatically replaced by this migration. No proprietary MRI source files or physical USB media are used in packaging tests.
+
 ## Validation, license and cost
 
 Windows CI checks real entry points, selection/confirmation, simulated failures, ISO mounting, native process cancellation, and FAT32/copy/hash operations on owned disposable virtual disks. Four actual copy-worker lifetimes overlap in the concurrency test. The selected-batch check also cleans existing multi-partition contents and ends without writing permanent erase registrations. See [Actions](https://github.com/Cucklord420/MRI-Drive-Maker/actions) for results tied to source revisions.
