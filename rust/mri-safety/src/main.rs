@@ -50,7 +50,7 @@ fn block_reason<'a>(disk: &'a Disk, request: &'a Request) -> Option<String> {
     if disk.key.trim().is_empty() {
         return Some(format!("Hardware identity unavailable: {}", disk.identity_error));
     }
-    if disk.bus_type != "USB" || disk.is_boot || disk.is_system {
+    if !same(&disk.bus_type, "USB") || disk.is_boot || disk.is_system {
         return Some("Boot, system, and non-USB disks are excluded.".into());
     }
     if disk.is_offline || disk.is_read_only {
