@@ -24,3 +24,5 @@ The separately merged static-analysis workflow from main commit `5f0aebd8984fba3
 Validation uses owned temporary virtual disks, not physical store USBs. It cannot establish MRI firmware boot compatibility or a measured speedup for 30 USB drives.
 
 Sources: JStone21 — 12-03-2023 — https://github.com/JStone21/MRI-Creation/tree/aa7bdc528eb95952be3c95710e277025b3eea5be
+
+Windows validation passed on 10-15-2026 for source `7cc27fd49389a453a92d94368f9e2fa138d7494a`: [run 38742906228](https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38742906228). The candidate download's 249,005 bytes match the reproducible builder exactly. Evidence and scope are recorded under `validation/cleanup-10-15-2026/`.

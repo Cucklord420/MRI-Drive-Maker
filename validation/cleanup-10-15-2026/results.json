@@ -1,0 +1,27 @@
+{
+  "date": "10-15-2026",
+  "source_commit": "7cc27fd49389a453a92d94368f9e2fa138d7494a",
+  "windows_run": "https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38742906228",
+  "windows_job": 116448933832,
+  "static_analysis_run": "https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38742841929",
+  "static_analysis_source": "2a670d9770f6b2c1e0806bc0e256c32f46a3efb5",
+  "counts": {
+    "build_cases": 67,
+    "startup": 6,
+    "selection": 6,
+    "source": 15,
+    "native_process": 2,
+    "owned_iso_vhd": 8,
+    "parallel_vhd": 6,
+    "package": 2
+  },
+  "platform": "Windows Server 2025; Windows PowerShell 5.1.26100.33438",
+  "archive": {
+    "path": "downloads/MRI-Drive-Maker-v0.3.0.zip",
+    "sha256": "3e9e19e6071a544fef96bcaba209f04e17c21741d8a0cd0e974a6777eefb7b9b",
+    "bytes": 249005,
+    "files": 20,
+    "bit_identical_to_ci_builder": true
+  },
+  "scope": "Storage classification is simulated only for explicitly owned VHD fixtures. Real formatting, volume GUID copy workers, hashes, flushes, process overlap, and a finite selected batch are exercised. No physical USB throughput or MRI firmware boot test."
+}

@@ -1,0 +1,55 @@
+Source: 7cc27fd49389a453a92d94368f9e2fa138d7494a
+Run: https://github.com/Cucklord420/MRI-Drive-Maker/actions/runs/38742906228
+PASS Direct -File launch with default configuration from another folder
+PASS Direct -File launch accepts an explicit configuration path
+PASS Direct -File launch accepts an empty configuration path
+  67/67 tests passed.
+PASS Main entry point runs the full simulated suite via -File -Action SelfTest
+PASS Validation runner resolves omitted paths after -File parameter binding
+PASS The sole START-MRI-DRIVE-MAKER.cmd launcher starts PowerShell 5.1 from a folder with spaces and ampersand
+6/6 startup tests passed.
+    "PowerShellVersion":  "5.1.26100.33438",
+    "Platform":  "Win32NT",
+PASS Explicit selection accepts comma-separated disks and removes duplicates
+PASS Malformed or partly missing selections cannot authorize a batch
+PASS Protected source/system disks and duplicate serials remain excluded
+PASS A generic yes does not confirm the displayed erase list
+PASS Exact list confirmation creates only session approvals and writes no registrations
+PASS A USB replaced during confirmation cannot reach the batch runner
+6/6 selection checks passed.
+PASS Extracted source folders open without a setup batch
+PASS Single wrapper folders resolve to the actual boot-file root
+PASS A selected folder containing one child directory preserves that directory at the USB root
+PASS ZIP contents open in an isolated cache and are removed on close
+PASS Owned ZIP caches inside a source checkout are allowed without allowing source/program overlap
+PASS Archive traversal paths are rejected before extraction
+PASS Archive case-insensitive duplicate paths are rejected
+PASS Unknown source kinds are rejected
+PASS Windows device aliases in source archives are rejected before files are extracted
+PASS Authenticated runtime data detects tampering before it can be used
+PASS Chunked SHA-256 matches the standard result and checks cancellation inside a large file
+PASS A cancelled storage-object query cannot reach disk APIs
+PASS A matching fresh storage object is returned for the registered physical drive
+PASS A replacement reusing the displayed disk number is blocked before erasure
+PASS A fresh non-USB storage object is blocked even when inventory says USB
+15/15 source tests passed.
+PASS Windows storage cmdlets expose the parameter sets used by the builder
+PASS A real ISO opens read-only and exposes its contained boot-file tree
+PASS An existing ISO mount is reused and not ejected by a second source context
+PASS Actual FAT32 volume GUID paths can be enumerated safely
+PASS ISO-to-volume copy runs the real copy worker, verification and volume flushing
+PASS Actual verified media is skipped on reinsertion
+PASS Unexpected content on the virtual target prevents a second copy
+PASS Destructive storage guard rejects a file-backed disk even with mocked USB inventory
+8/8 Windows storage checks passed. Only owned ISO/VHD fixtures were used.
+PASS Four real background builds prepare FAT32 and copy verified files to separate owned VHD roots
+PASS All four actual native copy-worker process lifetimes overlap
+PASS FAT32 copies and hashes work without assigning drive letters
+PASS Changing the real build concurrency does not format or copy verified media again
+PASS The actual copy worker rejects a redirected plan before touching its target
+PASS The real selected batch cleans existing multi-partition contents, builds four USB fixtures and exits without permanent approvals
+6/6 parallel Windows storage checks passed. Only owned VHD fixtures were modified.
+PASS Packaged source hashes and the single obvious launcher are correct.
+PASS The actual packaged top-level launcher opens the selected-drive menu on Windows PowerShell 5.1.
+
+Storage classification is simulated only for explicitly owned VHD fixtures. Real formatting, volume GUID copy workers, hashes, flushes, process overlap, and a finite selected batch are exercised. No physical USB throughput or MRI firmware boot test.
