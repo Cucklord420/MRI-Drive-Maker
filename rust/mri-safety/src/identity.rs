@@ -17,7 +17,7 @@ pub struct HardwareIdentity {
 #[serde(rename_all = "PascalCase")]
 pub struct IdentityResponse {
     key: Option<String>,
-    error: Option<String>,
+    pub error: Option<String>,
 }
 
 pub fn key(serial:&str,pnp_id:&str,model:&str,size:i64)->Result<String,String>{
