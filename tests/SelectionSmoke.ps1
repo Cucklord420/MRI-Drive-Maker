@@ -88,9 +88,13 @@ try {
     # A selected USB that disappears before its slot must end the finite
     # batch, record failure, and make the actual runner report failure.
     $definition=$ast.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Watch-Media'},$false)
-    . ([scriptblock]::Create($definition.Extent.Text))
+    # Dynamically compiled test functions have no file-based PSScriptRoot.
+    $script:SelectionAppRoot=$root
+    . ([scriptblock]::Create($definition.Extent.Text.Replace('$PSScriptRoot','$script:SelectionAppRoot')))
     $script:LiveInventory=@()
-    Throws { Watch-Media -SessionRecords @($approved) }
+    $errorText=''
+    try { Watch-Media -SessionRecords @($approved) } catch { $errorText=$_.Exception.Message }
+    if ($errorText -notlike 'Batch failed or cancelled for 1 selected USB*') { throw "Unexpected batch result: $errorText" }
     $summaries=@(Get-ChildItem -LiteralPath $DataPath -Filter summary.json -Recurse)
     Check ($summaries.Count -eq 1)
     $summary=Read-MRIJson $summaries[0].FullName
