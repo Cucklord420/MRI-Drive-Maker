@@ -10,6 +10,7 @@ on:
       - 'mri-config.example.json'
       - 'tests/**'
       - 'scripts/**'
+      - 'rust/mri-release/**'
       - 'downloads/SHA256SUMS.txt'
       - 'downloads/MRI-Drive-Maker-*.zip'
       - '.github/workflows/powershell.yml'
@@ -69,13 +70,13 @@ jobs:
         shell: powershell
         run: |
           $archive=Join-Path $env:RUNNER_TEMP 'MRI-Drive-Maker-candidate.zip'
-          python ./scripts/Build-Download.py --output $archive
+          cargo run --quiet --manifest-path rust/mri-release/Cargo.toml -- --output $archive
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & ./tests/PackageSmoke.ps1 -ArchivePath $archive
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $published='./downloads/MRI-Drive-Maker-v0.3.0.zip'
           if (Test-Path -LiteralPath $published) {
-            python ./scripts/Build-Download.py --verify $published
+            cargo run --quiet --manifest-path rust/mri-release/Cargo.toml -- --verify $published
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             & ./tests/PackageSmoke.ps1 -ArchivePath $published
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

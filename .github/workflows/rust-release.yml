@@ -1,0 +1,49 @@
+name: Rust MRI release packaging and original-Python parity
+on:
+  push:
+    paths:
+      - 'rust/mri-release/**'
+      - 'scripts/Build-Download.py'
+      - 'tests/PackageSmoke.ps1'
+      - '.github/workflows/rust-release.yml'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rust-release-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout full committed-source history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Rust release build and original Python differential tests
+        run: cargo test --manifest-path rust/mri-release/Cargo.toml
+  windows-release-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout verified release sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Produce and verify native Rust release candidate
+        shell: pwsh
+        run: |
+          $archive=Join-Path $env:RUNNER_TEMP 'MRI-Rust-candidate.zip'
+          cargo run --manifest-path rust/mri-release/Cargo.toml -- --output $archive
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo run --manifest-path rust/mri-release/Cargo.toml -- --verify $archive
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "RUST_RELEASE_CANDIDATE=$archive" >> $env:GITHUB_ENV
+      - name: Test extracted Rust-built package and actual Windows launcher
+        shell: powershell
+        run: |
+          & ./tests/PackageSmoke.ps1 -ArchivePath $env:RUST_RELEASE_CANDIDATE
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
