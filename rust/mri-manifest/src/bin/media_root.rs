@@ -10,45 +10,67 @@ fn assert_plain_directory(path: &Path) -> Result<(), String> {
     for parent in absolute.ancestors() {
         let metadata = std::fs::symlink_metadata(parent).map_err(|e| e.to_string())?;
         if metadata.file_type().is_symlink() {
-            return Err("Source/target paths cannot pass through links or mounted-directory junctions.".into());
+            return Err(
+                "Source/target paths cannot pass through links or mounted-directory junctions."
+                    .into(),
+            );
         }
         #[cfg(windows)]
         {
             use std::os::windows::fs::MetadataExt;
             if metadata.file_attributes() & 0x400 != 0 {
-                return Err("Source/target paths cannot pass through links or mounted-directory junctions.".into());
+                return Err(
+                    "Source/target paths cannot pass through links or mounted-directory junctions."
+                        .into(),
+                );
             }
         }
     }
-    if !std::fs::metadata(absolute).map_err(|e| e.to_string())?.is_dir() {
+    if !std::fs::metadata(absolute)
+        .map_err(|e| e.to_string())?
+        .is_dir()
+    {
         return Err("A source directory is required.".into());
     }
     Ok(())
 }
 
 fn policy(input: &Value) -> Result<Value, String> {
-    let value=input["Path"].as_str().ok_or("Missing media folder")?;
+    let value = input["Path"].as_str().ok_or("Missing media folder")?;
     assert_plain_directory(Path::new(value))?;
-    let mut root=std::fs::canonicalize(value).map_err(|e|e.to_string())?;
+    let mut root = std::fs::canonicalize(value).map_err(|e| e.to_string())?;
     for _depth in 0..10 {
         assert_plain_directory(&root)?;
         if root.join("bootmgr").is_file()
-            || root.join("efi").join("boot").join("bootx64.efi").is_file() {
+            || root.join("efi").join("boot").join("bootx64.efi").is_file()
+        {
             return Ok(json!(root.to_string_lossy()));
         }
-        let entries=std::fs::read_dir(&root).map_err(|e|e.to_string())?
-            .collect::<Result<Vec<_>,_>>().map_err(|e|e.to_string())?;
-        if entries.len()!=1 {return Ok(json!(root.to_string_lossy()));}
-        let next=entries[0].path();
-        let ty=entries[0].file_type().map_err(|e|e.to_string())?;
-        if ty.is_symlink() {
-            return Err("Source/target paths cannot pass through links or mounted-directory junctions.".into());
+        let entries = std::fs::read_dir(&root)
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        if entries.len() != 1 {
+            return Ok(json!(root.to_string_lossy()));
         }
-        if !ty.is_dir() { return Ok(json!(root.to_string_lossy())); }
+        let next = entries[0].path();
+        let ty = entries[0].file_type().map_err(|e| e.to_string())?;
+        if ty.is_symlink() {
+            return Err(
+                "Source/target paths cannot pass through links or mounted-directory junctions."
+                    .into(),
+            );
+        }
+        if !ty.is_dir() {
+            return Ok(json!(root.to_string_lossy()));
+        }
         assert_plain_directory(&next)?;
-        root=next;
+        root = next;
     }
-    Err("The source has too many nested wrapper folders. Choose its boot-files folder directly.".into())
+    Err(
+        "The source has too many nested wrapper folders. Choose its boot-files folder directly."
+            .into(),
+    )
 }
 
 fn main() {
@@ -78,18 +100,23 @@ mod tests {
     use super::*;
     #[test]
     fn detects_boot_files_under_nested_synthetic_wrappers() {
-        let temp=tempfile::tempdir().unwrap();
-        let nested=temp.path().join("wrapper").join("second");
+        let temp = tempfile::tempdir().unwrap();
+        let nested = temp.path().join("wrapper").join("second");
         std::fs::create_dir_all(&nested).unwrap();
-        std::fs::write(nested.join("bootmgr"),b"synthetic").unwrap();
-        assert_eq!(policy(&json!({"Path":temp.path()})).unwrap(),
-            json!(nested.canonicalize().unwrap().to_string_lossy()));
+        std::fs::write(nested.join("bootmgr"), b"synthetic").unwrap();
+        assert_eq!(
+            policy(&json!({"Path":temp.path()})).unwrap(),
+            json!(nested.canonicalize().unwrap().to_string_lossy())
+        );
     }
     #[test]
     fn rejects_excessive_wrapper_depth() {
-        let tmp=tempfile::tempdir().unwrap();
-        let mut inner=PathBuf::from(tmp.path());
-        for _ in 0..11 {inner.push("outer");std::fs::create_dir(&inner).unwrap();}
+        let tmp = tempfile::tempdir().unwrap();
+        let mut inner = PathBuf::from(tmp.path());
+        for _ in 0..11 {
+            inner.push("outer");
+            std::fs::create_dir(&inner).unwrap();
+        }
         assert!(policy(&json!({"Path":tmp.path()})).is_err());
     }
     #[cfg(unix)]
