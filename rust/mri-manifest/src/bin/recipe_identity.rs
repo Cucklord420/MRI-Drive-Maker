@@ -158,7 +158,7 @@ mod tests {
         for case in 0..100 {
             let mut input = fixture();
             input["SourceManifest"]["Digest"] = json!(format!("SYNTHETIC-{case:03}"));
-            match case % 10 {
+            match case % 13 {
                 0 => {}
                 1 => input["Config"]["PrepareDisk"] = json!(false),
                 2 => input["Config"]["SetupBatch"] = json!("prepare.cmd"),
@@ -169,6 +169,9 @@ mod tests {
                 7 => input["Config"]["MaxParallel"] = json!(1),
                 8 => input["Config"]["RequiredFiles"] = json!(["café.txt"]),
                 9 => input["Config"]["SetupArguments"] = json!(["embedded \"quote\"", "a&b"]),
+                10 => input["Config"]["SetupArguments"] = json!("/quiet"),
+                11 => input["Config"]["RequiredFiles"] = json!("bootmgr"),
+                12 => input["Config"]["MutableFiles"] = json!("BCD"),
                 _ => unreachable!(),
             }
             let expected = powershell_oracle(&input);
