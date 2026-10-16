@@ -3,7 +3,10 @@
 use serde_json::{json, Value};
 
 fn policy(input: &Value) -> Result<Value, String> {
-    let value = input.get("CancelPath").and_then(Value::as_str).unwrap_or("");
+    let value = input
+        .get("CancelPath")
+        .and_then(Value::as_str)
+        .unwrap_or("");
     if !value.is_empty() && std::path::Path::new(value).is_file() {
         Err("Build cancelled.".into())
     } else {
@@ -38,8 +41,11 @@ mod tests {
     use super::*;
     #[test]
     fn missing_or_empty_cancel_marker_allows_continue() {
-        assert_eq!(policy(&json!({"CancelPath":""})).unwrap(),true);
-        assert_eq!(policy(&json!({"CancelPath":"__not_a_real_path__"})).unwrap(),true);
+        assert_eq!(policy(&json!({"CancelPath":""})).unwrap(), true);
+        assert_eq!(
+            policy(&json!({"CancelPath":"__not_a_real_path__"})).unwrap(),
+            true
+        );
     }
     #[test]
     fn existing_cancel_marker_stops_work() {
