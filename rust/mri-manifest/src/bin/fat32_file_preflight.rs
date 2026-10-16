@@ -3,26 +3,41 @@
 use serde_json::{json, Value};
 
 fn policy(input: &Value) -> Result<Value, String> {
-    let files=input.get("Entries").and_then(Value::as_array).ok_or("Missing Entries")?;
-    let mut seen=0usize;
-    for file in files {
-        if file["IsDirectory"]==true {continue;}
-        let len=file["Length"].as_u64().ok_or("Invalid file length")?;
-        if len>4_294_967_295 {return Err("A source file exceeds the FAT32 file-size limit.".into());}
-        seen+=1;
-    }
-    if seen==0 {return Err("MRI source contains no files.".into());}
-    let required=input.get("RequiredFiles").and_then(Value::as_array)
+    let files = input.get("Entries").and_then(Value::as_array).ok_or("Missing Entries")?;
+    let required = input.get("RequiredFiles").and_then(Value::as_array)
         .ok_or("Missing required files list")?;
-    for name in required {
-        let wanted=name.as_str().ok_or("Required file name is invalid")?;
-        if !files.iter().any(|f|f["IsDirectory"]==false
-            && f["RelativePath"].as_str().is_some_and(|p|p.eq_ignore_ascii_case(wanted))
-            && f["Length"].as_u64().is_some_and(|x|x>0)) {
-            return Err(format!("The source does not contain the configured required file: {wanted}"));
+    let mut count = 0usize;
+    for entry in files {
+        if entry["IsDirectory"] != true {
+            count += 1;
         }
     }
-    Ok(json!({"Files":seen}))
+    // Match Invoke-MRIBuild, not a fictitious unconditional boot-file gate.
+    if count == 0 {
+        return Err("The source contains no files. Preparation was not started.".into());
+    }
+    let run_setup = input.get("SetupBatch").and_then(Value::as_str)
+        .is_some_and(|batch| !batch.trim().is_empty());
+    if !run_setup {
+        for name in required {
+            let wanted = name.as_str().ok_or("Required file name is invalid")?;
+            if !files.iter().any(|file| file["IsDirectory"] == false
+                && file["RelativePath"].as_str().is_some_and(|path| path.eq_ignore_ascii_case(wanted))
+                && file["Length"].as_u64().is_some_and(|length| length > 0)) {
+                return Err(format!("Required boot file is missing from the source: {wanted}"));
+            }
+        }
+    }
+    for file in files {
+        if file["IsDirectory"] == true {
+            continue;
+        }
+        let length = file["Length"].as_u64().ok_or("Invalid file length")?;
+        if length > 4_294_967_295 {
+            return Err("A source file is larger than FAT32 permits.".into());
+        }
+    }
+    Ok(json!({"Files":count}))
 }
 
 fn main() {
@@ -50,17 +65,34 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
-    fn boundary_sizes_and_required_paths() {
-        let base=json!({"Entries":[{"RelativePath":"bootmgr","IsDirectory":false,"Length":4294967295_u64}],
-            "RequiredFiles":["BOOTMGR"]});
+    fn validates_direct_copy_limits_and_required_boot_files() {
+        let base = json!({"Entries":[{"RelativePath":"bootmgr","IsDirectory":false,
+            "Length":4294967295_u64}], "RequiredFiles":["BOOTMGR"],"SetupBatch":""});
         assert!(policy(&base).is_ok());
-        let mut over=base.clone();
-        over["Entries"][0]["Length"]=json!(4294967296_u64);
-        assert!(policy(&over).unwrap_err().contains("FAT32"));
-        let mut missing=base.clone();
-        missing["RequiredFiles"]=json!(["EFI/BOOT/BOOTX64.EFI"]);
-        assert!(policy(&missing).is_err());
-        assert!(policy(&json!({"Entries":[],"RequiredFiles":[]})).is_err());
+        let mut over = base.clone();
+        over["Entries"][0]["Length"] = json!(4294967296_u64);
+        assert_eq!(policy(&over).unwrap_err(), "A source file is larger than FAT32 permits.");
+        let mut missing = base.clone();
+        missing["RequiredFiles"] = json!(["EFI/BOOT/BOOTX64.EFI"]);
+        assert_eq!(policy(&missing).unwrap_err(),
+            "Required boot file is missing from the source: EFI/BOOT/BOOTX64.EFI");
+        assert_eq!(policy(&json!({"Entries":[],"RequiredFiles":[]})).unwrap_err(),
+            "The source contains no files. Preparation was not started.");
+    }
+
+    #[test]
+    fn setup_mode_must_not_reject_source_for_missing_final_boot_files() {
+        let setup = json!({"Entries":[{"RelativePath":"payload.bin","IsDirectory":false,
+            "Length":12}],"RequiredFiles":["bootmgr"],"SetupBatch":"setup.cmd"});
+        assert!(policy(&setup).is_ok());
+        let mut direct = setup.clone();
+        direct["SetupBatch"] = json!("");
+        assert!(policy(&direct).is_err());
+        let mut oversized = setup;
+        oversized["Entries"][0]["Length"] = json!(4294967296_u64);
+        assert_eq!(policy(&oversized).unwrap_err(),
+            "A source file is larger than FAT32 permits.");
     }
 }
