@@ -72,10 +72,10 @@ try {
         $rustKeys = @($rust.Result.Tracker.PSObject.Properties)
         if ($rustKeys.Count -ne $tracker.Count) { throw "Tracker key count mismatch in case $n" }
         foreach ($existing in @($tracker.Keys)) {
-            $matches = @($rustKeys | Where-Object { $_.Name -ieq $existing })
-            if ($matches.Count -ne 1) { throw "Tracker key mismatch in case $n" }
+            $matchingKeys = @($rustKeys | Where-Object { $_.Name -ieq $existing })
+            if ($matchingKeys.Count -ne 1) { throw "Tracker key mismatch in case $n" }
             $left = $tracker[$existing]
-            $right = $matches[0].Value
+            $right = $matchingKeys[0].Value
             if ([long]$left.Number -ne [long]$right.Number -or
                 [long]$left.Stable -ne [long]$right.Stable -or
                 [bool]$left.Attempted -ne [bool]$right.Attempted) {
