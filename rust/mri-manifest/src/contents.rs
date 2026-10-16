@@ -137,8 +137,9 @@ mod tests {
         // A lowercase hexadecimal receipt is still the same valid digest.
         let mut lower_receipt = receipt.clone();
         for entry in lower_receipt["TargetManifest"]["Entries"].as_array_mut().unwrap() {
-            if let Some(digest) = entry["Sha256"].as_str() {
-                entry["Sha256"] = Value::String(digest.to_ascii_lowercase());
+            let lower = entry["Sha256"].as_str().map(str::to_ascii_lowercase);
+            if let Some(lower) = lower {
+                entry["Sha256"] = Value::String(lower);
             }
         }
         assert!(verify(root, Some(&lower_receipt)).unwrap());
