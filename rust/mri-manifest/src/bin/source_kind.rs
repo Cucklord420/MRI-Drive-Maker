@@ -3,9 +3,20 @@
 use serde_json::{json, Value};
 
 fn policy(input: &Value) -> Result<Value, String> {
-    let Some(kind) = input.get("SourceKind") else {
+    let object = input
+        .as_object()
+        .ok_or("Configuration must be a JSON object.")?;
+    // The original PowerShell PSObject property lookup ignores key casing.
+    // Do not silently choose an ambiguous duplicate supplied as raw JSON.
+    let mut keys = object
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("SourceKind"));
+    let Some((_, kind)) = keys.next() else {
         return Ok(json!("Folder"));
     };
+    if keys.next().is_some() {
+        return Err("Duplicate case-insensitive SourceKind keys.".into());
+    }
     let kind = kind
         .as_str()
         .ok_or("SourceKind must be Folder, ISO, or ZIP.")?;
@@ -47,11 +58,15 @@ mod tests {
         for value in ["Folder", "ISO", "ZIP", "zip", "folder", "isO"] {
             assert_eq!(policy(&json!({"SourceKind":value})).unwrap(), value);
         }
+        assert_eq!(policy(&json!({"sourcekind":"zip"})).unwrap(), "zip");
+        assert_eq!(policy(&json!({"SOURCEKIND":"ISO"})).unwrap(), "ISO");
     }
     #[test]
     fn source_kind_fails_closed() {
         for value in [json!(null), json!(1), json!("BAD"), json!(""), json!(false)] {
             assert!(policy(&json!({"SourceKind":value})).is_err());
         }
+        assert!(policy(&json!({"SourceKind":"Folder","sourcekind":"ZIP"})).is_err());
+        assert!(policy(&Value::Null).is_err());
     }
 }
