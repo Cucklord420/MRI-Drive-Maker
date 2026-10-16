@@ -101,7 +101,7 @@ fn verify(repo: &Path, archive_path: &Path) -> Result<Manifest, String> {
     }
     Ok(manifest)
 }
-// zip-rs emits "version made by" 0x032E (46, Unix); Python zipfile
+// zip-rs 9 emits 0x030A for stored files (historical zip-rs: 0x032E); Python zipfile
 // uses 0x0314 (20, Unix). For a byte-identical reproducible source ZIP,
 // normalize ONLY that central-directory metadata. Do not modify file payloads.
 fn normalize_zip_creator_version(path:&Path)->Result<(),String>{
@@ -127,7 +127,7 @@ fn normalize_zip_creator_version(path:&Path)->Result<(),String>{
             || bytes.get(cursor..cursor+4)!=Some(&b"PK\x01\x02"[..]) {
             return Err("Invalid ZIP central-directory header".into());
         }
-        if bytes[cursor+4]!=46 || bytes[cursor+5]!=3 {
+        if ![10u8,46u8].contains(&bytes[cursor+4]) || bytes[cursor+5]!=3 {
             return Err(format!("Unexpected native ZIP creator platform/version: {}/{}", bytes[cursor+4], bytes[cursor+5]));
         }
         bytes[cursor+4]=20; // Python zipfile: version made by 20
