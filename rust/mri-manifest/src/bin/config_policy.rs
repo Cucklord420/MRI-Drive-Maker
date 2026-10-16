@@ -79,12 +79,18 @@ mod tests {
     #[test]
     fn type_limits_are_enforced() {
         assert!(policy(&base()).is_ok());
-        for (field,value) in [("MaxParallel",json!(31)),
-            ("PollSeconds",json!(0)),("StablePolls",json!(1)),
-            ("FileSystem",json!("exFAT")),("SerializeSetup",json!("yes")),
-            ("MinimumDiskBytes",json!(0)),("CopyTimeoutSeconds",json!(0))]{
-            let mut v=base();v[field]=value;
-            assert!(policy(&v).is_err(),"should reject {field}");
+        for (field, value) in [
+            ("MaxParallel", json!(31)),
+            ("PollSeconds", json!(0)),
+            ("StablePolls", json!(1)),
+            ("FileSystem", json!("exFAT")),
+            ("SerializeSetup", json!("yes")),
+            ("MinimumDiskBytes", json!(0)),
+            ("CopyTimeoutSeconds", json!(0)),
+        ] {
+            let mut v = base();
+            v[field] = value;
+            assert!(policy(&v).is_err(), "should reject {field}");
         }
     }
 }
