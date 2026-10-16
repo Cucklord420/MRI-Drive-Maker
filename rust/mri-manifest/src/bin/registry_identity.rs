@@ -5,9 +5,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 
 fn policy(input: &Value) -> Result<Value, String> {
-    let records = input["Records"]
-        .as_array()
-        .ok_or("Missing Records array")?;
+    let records = input["Records"].as_array().ok_or("Missing Records array")?;
     let mut keys = HashSet::new();
     let mut serials = HashSet::new();
     let mut labels = HashSet::new();
