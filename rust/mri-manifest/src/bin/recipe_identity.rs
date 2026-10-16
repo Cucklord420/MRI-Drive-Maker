@@ -3,6 +3,13 @@
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
+fn powershell_array(value: &Value) -> Value {
+    match value {
+        Value::Array(_) => value.clone(),
+        _ => json!([value]),
+    }
+}
+
 fn policy(input: &Value) -> Result<Value, String> {
     let config = input.get("Config").ok_or("Missing Config")?;
     let manifest = input
@@ -23,7 +30,12 @@ fn policy(input: &Value) -> Result<Value, String> {
         let value = config
             .get(key)
             .ok_or_else(|| format!("Missing recipe setting: {key}"))?;
-        fields.insert(key.into(), value.clone());
+        let recipe_value = if matches!(key, "SetupArguments" | "RequiredFiles" | "MutableFiles") {
+            powershell_array(value)
+        } else {
+            value.clone()
+        };
+        fields.insert(key.into(), recipe_value);
     }
     fields.insert(
         "SourceDigest".into(),
@@ -162,6 +174,25 @@ mod tests {
             let expected = powershell_oracle(&input);
             let actual = policy(&input).unwrap();
             assert_eq!(actual.as_str(), Some(expected.as_str()), "recipe parity case {case}");
+        }
+    }
+
+    #[test]
+    fn powershell_array_coercion_matches_scalar_and_array_settings() {
+        for (name, element) in [
+            ("SetupArguments", "/quiet"),
+            ("RequiredFiles", "bootmgr"),
+            ("MutableFiles", "EFI\\BOOT\\BOOTX64.EFI"),
+        ] {
+            let mut scalar = fixture();
+            scalar["Config"][name] = json!(element);
+            let mut array = fixture();
+            array["Config"][name] = json!([element]);
+            assert_eq!(
+                policy(&scalar).unwrap(),
+                policy(&array).unwrap(),
+                "PowerShell array coercion differs for {name}"
+            );
         }
     }
 
