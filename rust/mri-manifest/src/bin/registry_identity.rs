@@ -5,10 +5,10 @@ use sha2::{Digest,Sha256};
 use std::collections::HashSet;
 
 fn policy(input: &Value) -> Result<Value, String> {
-    let records=input["Records"].as_array().ok_or("Missing Records array")?;
-    let mut keys=HashSet::new();
-    let mut serials=HashSet::new();
-    let mut labels=HashSet::new();
+    let records = input["Records"].as_array().ok_or("Missing Records array")?;
+    let mut keys = HashSet::new();
+    let mut serials = HashSet::new();
+    let mut labels = HashSet::new();
     for record in records {
         for field in ["Key","Serial","PnpId","Model","Size","Label","AllowErase"] {
             if record.get(field).is_none(){return Err(format!("Drive registry is missing {field}."));}
