@@ -17,7 +17,7 @@ fn policy(input: &Value) -> Result<Value, String> {
     let mut resolved = std::path::PathBuf::from(root).join("System32");
     for part in relative.split('\\') {
         if part.is_empty() || part == "." || part == ".."
-            || part.ends_with([' ', '.'])
+            || part.ends_with(' ') || part.ends_with('.')
             || part.chars().any(|c| c.is_control() || "<>:\"|?*".contains(c)) {
             return Err("Executable must be a safe relative path below System32".into());
         }
