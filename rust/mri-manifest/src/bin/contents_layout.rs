@@ -34,11 +34,17 @@ fn policy(input: &Value) -> Result<Value, String> {
         {
             return Err(MISSING_OR_EXTRA.into());
         }
-        // A receipt manifest from Get-MRIManifest never contains duplicate
-        // case-insensitive paths. Refuse ambiguous injected manifests rather
-        // than allowing a later duplicate to replace the first entry.
-        if expected.insert(path.to_lowercase(), entry).is_some() {
-            return Err(MISSING_OR_EXTRA.into());
+        // PowerShell's case-insensitive hashtable accepts repeated receipt
+        // paths. Identical repeats preserve its layout decision; inconsistent
+        // repeats stay rejected because the full manifest verifier checks
+        // every original entry, not just the hashtable's last value.
+        if let Some(previous) = expected.insert(path.to_lowercase(), entry) {
+            if previous["IsDirectory"] != entry["IsDirectory"]
+                || previous["Length"] != entry["Length"]
+                || previous["Sha256"] != entry["Sha256"]
+            {
+                return Err(MISSING_OR_EXTRA.into());
+            }
         }
     }
     if expected.len() != current.len() {
@@ -135,13 +141,23 @@ mod tests {
     }
 
     #[test]
-    fn duplicated_receipt_path_is_rejected_even_when_unique_count_matches() {
+    fn identical_receipt_duplicates_follow_original_hashtable_parity() {
         let boot = entry("EFI\\BOOT\\BOOTX64.EFI", 300);
-        let input = input(
+        let fixture = input(
             vec![boot.clone()],
             vec![boot.clone(), entry("efi\\boot\\bootx64.efi", 300)],
         );
-        assert_eq!(policy(&input).unwrap_err(), MISSING_OR_EXTRA);
+        assert_eq!(policy(&fixture).unwrap(), true);
+    }
+
+    #[test]
+    fn conflicting_receipt_duplicates_are_rejected() {
+        let boot = entry("EFI\\BOOT\\BOOTX64.EFI", 300);
+        let fixture = input(
+            vec![boot.clone()],
+            vec![entry("efi\\boot\\bootx64.efi", 301), boot],
+        );
+        assert_eq!(policy(&fixture).unwrap_err(), MISSING_OR_EXTRA);
     }
 
     #[test]
