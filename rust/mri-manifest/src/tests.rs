@@ -88,3 +88,65 @@ fn refuses_missing_source_and_linked_inputs() {
         assert!(compute(&link, false, false).is_err());
     }
 }
+
+#[test]
+fn ignored_system_directories_are_pruned_before_descent() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    for name in ["System Volume Information", "$RECYCLE.BIN"] {
+        let nested = root.join(name).join("deep");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("private.txt"), b"synthetic").unwrap();
+    }
+    fs::write(root.join("bootmgr"), b"test").unwrap();
+
+    // Inspect the iterator itself: ignored directories must not be opened or
+    // yielded, rather than merely filtered from the final JSON manifest.
+    let entries = WalkDir::new(root)
+        .min_depth(1)
+        .into_iter()
+        .filter_entry(|entry| include_entry(entry, true))
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(entries, ["bootmgr"]);
+    let manifest = compute(root, true, false).unwrap();
+    assert_eq!(manifest.entries.len(), 1);
+    assert_eq!(manifest.entries[0].relative_path, "bootmgr");
+}
+
+#[cfg(unix)]
+#[test]
+fn refuses_special_files_instead_of_attempting_to_hash_them() {
+    use std::os::unix::net::UnixListener;
+    let tmp = tempfile::tempdir().unwrap();
+    let _socket = UnixListener::bind(tmp.path().join("socket")).unwrap();
+    for no_hash in [false, true] {
+        let error = compute(tmp.path(), false, no_hash).unwrap_err();
+        assert!(error.contains("Unsupported media entry type"), "{error}");
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_directory_junctions_are_refused_at_root_and_inside_source() {
+    use std::process::Command;
+    let tmp = tempfile::tempdir().unwrap();
+    let destination = tmp.path().join("physical");
+    let source = tmp.path().join("source");
+    fs::create_dir(&destination).unwrap();
+    fs::create_dir(&source).unwrap();
+    let junction = source.join("junction");
+    let status = Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(&junction)
+        .arg(&destination)
+        .status()
+        .unwrap();
+    assert!(status.success(), "Windows junction fixture creation failed");
+    let metadata = fs::symlink_metadata(&junction).unwrap();
+    assert!(has_link_or_reparse(&metadata));
+    assert!(compute(&junction, false, true).is_err());
+    assert!(compute(&source, false, true)
+        .unwrap_err()
+        .contains("Links are not allowed in media content"));
+}
