@@ -43,10 +43,10 @@ mod tests {
     }
     #[test]
     fn existing_cancel_marker_stops_work() {
-        let temp=tempfile::tempdir().unwrap();
-        let path=temp.path().join("cancel");
-        std::fs::write(&path,b"cancelled").unwrap();
-        let input=json!({"CancelPath":path.to_string_lossy()});
-        assert_eq!(policy(&input).unwrap_err(),"Build cancelled.");
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("cancel");
+        std::fs::write(&path, b"cancelled").unwrap();
+        let input = json!({"CancelPath":path.to_string_lossy()});
+        assert_eq!(policy(&input).unwrap_err(), "Build cancelled.");
     }
 }
