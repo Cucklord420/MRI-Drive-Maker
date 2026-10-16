@@ -112,7 +112,7 @@ pub(crate) fn verify(root: &Path, receipt: Option<&Value>) -> Result<bool, Strin
             .get("Sha256")
             .and_then(Value::as_str)
             .ok_or("Invalid receipt SHA-256")?;
-        if file_sha(&path)? != expected {
+        if !file_sha(&path)?.eq_ignore_ascii_case(expected) {
             return Err(format!("SHA-256 mismatch: {relative}"));
         }
     }
@@ -133,6 +133,15 @@ mod tests {
         assert_eq!(verify(root, None).unwrap_err(), NO_RECEIPT);
         let receipt = json!({"TargetManifest": compute(root, true, false).unwrap()});
         assert!(verify(root, Some(&receipt)).unwrap());
+        // Windows PowerShell compares SHA-256 strings case-insensitively.
+        // A lowercase hexadecimal receipt is still the same valid digest.
+        let mut lower_receipt = receipt.clone();
+        for entry in lower_receipt["TargetManifest"]["Entries"].as_array_mut().unwrap() {
+            if let Some(digest) = entry["Sha256"].as_str() {
+                entry["Sha256"] = Value::String(digest.to_ascii_lowercase());
+            }
+        }
+        assert!(verify(root, Some(&lower_receipt)).unwrap());
         fs::write(root.join("bootmgr"), b"tampr").unwrap();
         assert_eq!(
             verify(root, Some(&receipt)).unwrap_err(),
