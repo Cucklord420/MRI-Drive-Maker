@@ -2,6 +2,7 @@ name: Rust MRI safe relative paths (Windows parity)
 on:
   push:
     paths:
+      - 'rust-toolchain.toml'
       - 'rust/mri-path-safety/**'
       - 'MRI.Batch.psm1'
       - 'tests/RustPathParity.ps1'

@@ -2,6 +2,7 @@ name: Rust MRI manifest versus original PowerShell parity
 on:
   push:
     paths:
+      - 'rust-toolchain.toml'
       - 'rust/mri-manifest/**'
       - 'MRI.Batch.psm1'
       - 'tests/RustManifestParity.ps1'
