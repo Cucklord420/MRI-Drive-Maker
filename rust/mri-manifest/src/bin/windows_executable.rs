@@ -3,15 +3,24 @@
 use serde_json::{json, Value};
 
 fn policy(input: &Value) -> Result<Value, String> {
-    let root=input.get("SystemRoot").and_then(Value::as_str)
+    let root = input
+        .get("SystemRoot")
+        .and_then(Value::as_str)
         .ok_or("Missing SystemRoot")?;
-    let name=input.get("Name").and_then(Value::as_str)
+    let name = input
+        .get("Name")
+        .and_then(Value::as_str)
         .ok_or("Missing executable name")?;
-    if name.is_empty() || name.contains('/') || name.contains('\\')
-        || name=="." || name==".." || name.contains(':') {
+    if name.is_empty()
+        || name.contains('/')
+        || name.contains('\\')
+        || name == "."
+        || name == ".."
+        || name.contains(':')
+    {
         return Err("Executable must be a single filename".into());
     }
-    let resolved=std::path::Path::new(root).join("System32").join(name);
+    let resolved = std::path::Path::new(root).join("System32").join(name);
     Ok(json!(resolved.to_string_lossy()))
 }
 
@@ -42,13 +51,13 @@ mod tests {
     use super::*;
     #[test]
     fn standard_system32_programs_resolve_in_platform_paths() {
-        let result=policy(&json!({"SystemRoot":"C:\\Windows","Name":"cmd.exe"})).unwrap();
+        let result = policy(&json!({"SystemRoot":"C:\\Windows","Name":"cmd.exe"})).unwrap();
         assert!(result.as_str().unwrap().contains("System32"));
         assert!(result.as_str().unwrap().ends_with("cmd.exe"));
     }
     #[test]
     fn malicious_relative_names_do_not_escape_system32() {
-        for name in ["../bad.exe","..\\bad.exe","D:evil","/bad.exe",""] {
+        for name in ["../bad.exe", "..\\bad.exe", "D:evil", "/bad.exe", ""] {
             assert!(policy(&json!({"SystemRoot":"C:\\Windows","Name":name})).is_err());
         }
     }
