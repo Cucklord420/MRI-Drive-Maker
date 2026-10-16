@@ -266,6 +266,23 @@ mod tests {
     }
 
     #[test]
+    fn equal_positive_capacity_limits_remain_accepted() {
+        let mut q = request("6");
+        q.minimum_disk_bytes = 32_000_000_000;
+        q.maximum_disk_bytes = 32_000_000_000;
+        assert_eq!(respond(&q).selected, vec![6]);
+    }
+
+    #[test]
+    fn invalid_limits_reject_even_empty_selection() {
+        let mut q = request("");
+        q.minimum_disk_bytes = 0;
+        let result = respond(&q);
+        assert_eq!(result.error.as_deref(), Some("Invalid capacity limits."));
+        assert!(result.selected.is_empty());
+    }
+
+    #[test]
     fn hundred_deterministic_variations_have_strict_approval() {
         for i in 0..100 {
             let mut q = request("8,6");
