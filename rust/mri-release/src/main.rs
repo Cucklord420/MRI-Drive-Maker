@@ -10,7 +10,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use zip::{write::FileOptions, CompressionMethod, DateTime, ZipArchive, ZipWriter};
+use zip::{write::SimpleFileOptions, CompressionMethod, DateTime, ZipArchive, ZipWriter};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct Manifest {
@@ -49,7 +49,7 @@ fn verify(repo: &Path, archive_path: &Path) -> Result<Manifest, String> {
     let mut files = HashMap::new();
     for index in 0..zip.len() {
         let mut member = zip.by_index(index).map_err(|e| e.to_string())?;
-        let name = member.name().to_owned();
+        let name = member.name().map_err(|e| e.to_string())?.into_owned();
         if !names.insert(name.clone()) {
             return Err("Duplicate package entries".into());
         }
@@ -101,7 +101,7 @@ fn verify(repo: &Path, archive_path: &Path) -> Result<Manifest, String> {
     }
     Ok(manifest)
 }
-// zip-rs emits "version made by" 0x032E (46, Unix); Python zipfile
+// zip-rs 9 emits 0x030A for stored files (historical zip-rs: 0x032E); Python zipfile
 // uses 0x0314 (20, Unix). For a byte-identical reproducible source ZIP,
 // normalize ONLY that central-directory metadata. Do not modify file payloads.
 fn normalize_zip_creator_version(path:&Path)->Result<(),String>{
@@ -127,10 +127,29 @@ fn normalize_zip_creator_version(path:&Path)->Result<(),String>{
             || bytes.get(cursor..cursor+4)!=Some(&b"PK\x01\x02"[..]) {
             return Err("Invalid ZIP central-directory header".into());
         }
-        if bytes[cursor+4]!=46 || bytes[cursor+5]!=3 {
-            return Err("Unexpected native ZIP creator platform/version".into());
+        if ![10u8,46u8].contains(&bytes[cursor+4])
+            || ![0u8,3u8].contains(&bytes[cursor+5]) {
+            return Err(format!("Unexpected native ZIP creator platform/version: {}/{}", bytes[cursor+4], bytes[cursor+5]));
         }
+        // ZIP 9 marks even STORED files as version 10 (ZIP 1.0),
+        // while Python's ZipInfo constructor sets version needed to 20.
+        // Change only explicitly validated version-needed words and do
+        // not modify ZIP sizes, filenames, payload, CRC or flags.
+        if bytes[cursor+6]!=10 || bytes[cursor+7]!=0 {
+            return Err("Unexpected native ZIP central version-needed".into());
+        }
+        let local=u32::from_le_bytes([
+            bytes[cursor+42],bytes[cursor+43],bytes[cursor+44],bytes[cursor+45]
+        ]) as usize;
+        if local.checked_add(6).is_none_or(|v|v>start)
+            || bytes.get(local..local+4)!=Some(&b"PK\x03\x04"[..])
+            || bytes[local+4]!=10 || bytes[local+5]!=0 {
+            return Err("Unexpected native ZIP local header or version-needed".into());
+        }
+        bytes[local+4]=20;
+        bytes[cursor+6]=20;
         bytes[cursor+4]=20; // Python zipfile: version made by 20
+        bytes[cursor+5]=3; // Python ZipInfo sets Unix creator, including on Windows
         let filename_len=u16::from_le_bytes([bytes[cursor+28],bytes[cursor+29]]) as usize;
         let extra_len=u16::from_le_bytes([bytes[cursor+30],bytes[cursor+31]]) as usize;
         let comment_len=u16::from_le_bytes([bytes[cursor+32],bytes[cursor+33]]) as usize;
@@ -201,7 +220,7 @@ fn build(repo:&Path, path:&Path, version:&str)->Result<Manifest,String>{
     let mut zip=ZipWriter::new(output);
     let date=DateTime::from_date_and_time(2000,1,1,0,0,0)
         .map_err(|_|"Invalid fixed ZIP timestamp")?;
-    let options=FileOptions::default()
+    let options=SimpleFileOptions::default()
         .compression_method(CompressionMethod::Stored)
         .last_modified_time(date)
         .unix_permissions(0o644);
