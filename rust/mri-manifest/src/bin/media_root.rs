@@ -58,7 +58,7 @@ mod tests {
         std::fs::create_dir_all(&nested).unwrap();
         std::fs::write(nested.join("bootmgr"),b"synthetic").unwrap();
         assert_eq!(policy(&json!({"Path":temp.path()})).unwrap(),
-            json!(nested.to_string_lossy()));
+            json!(nested.canonicalize().unwrap().to_string_lossy()));
     }
     #[test]
     fn rejects_excessive_wrapper_depth() {
