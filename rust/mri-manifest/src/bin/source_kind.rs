@@ -3,14 +3,10 @@
 use serde_json::{json, Value};
 
 fn policy(input: &Value) -> Result<Value, String> {
-    let object = input
-        .as_object()
-        .ok_or("Configuration must be a JSON object.")?;
+    let object = input.as_object().ok_or("Configuration must be a JSON object.")?;
     // The original PowerShell PSObject property lookup ignores key casing.
     // Do not silently choose an ambiguous duplicate supplied as raw JSON.
-    let mut keys = object
-        .iter()
-        .filter(|(name, _)| name.eq_ignore_ascii_case("SourceKind"));
+    let mut keys = object.iter().filter(|(name, _)| name.eq_ignore_ascii_case("SourceKind"));
     let Some((_, kind)) = keys.next() else {
         return Ok(json!("Folder"));
     };
