@@ -3,9 +3,13 @@
 use serde_json::{json, Value};
 
 fn policy(input: &Value) -> Result<Value, String> {
-    let Some(kind) = input.get("SourceKind") else { return Ok(json!("Folder")); };
-    let kind = kind.as_str().ok_or("SourceKind must be Folder, ISO, or ZIP.")?;
-    if ["folder","iso","zip"].contains(&kind.to_ascii_lowercase().as_str()) {
+    let Some(kind) = input.get("SourceKind") else {
+        return Ok(json!("Folder"));
+    };
+    let kind = kind
+        .as_str()
+        .ok_or("SourceKind must be Folder, ISO, or ZIP.")?;
+    if ["folder", "iso", "zip"].contains(&kind.to_ascii_lowercase().as_str()) {
         Ok(json!(kind))
     } else {
         Err("SourceKind must be Folder, ISO, or ZIP.".into())
@@ -40,13 +44,13 @@ mod tests {
     #[test]
     fn source_kind_defaults_and_acceptance() {
         assert_eq!(policy(&json!({})).unwrap(), "Folder");
-        for value in ["Folder","ISO","ZIP","zip","folder","isO"] {
+        for value in ["Folder", "ISO", "ZIP", "zip", "folder", "isO"] {
             assert_eq!(policy(&json!({"SourceKind":value})).unwrap(), value);
         }
     }
     #[test]
     fn source_kind_fails_closed() {
-        for value in [json!(null),json!(1),json!("BAD"),json!(""),json!(false)] {
+        for value in [json!(null), json!(1), json!("BAD"), json!(""), json!(false)] {
             assert!(policy(&json!({"SourceKind":value})).is_err());
         }
     }
