@@ -130,6 +130,23 @@ fn normalize_zip_creator_version(path:&Path)->Result<(),String>{
         if ![10u8,46u8].contains(&bytes[cursor+4]) || bytes[cursor+5]!=3 {
             return Err(format!("Unexpected native ZIP creator platform/version: {}/{}", bytes[cursor+4], bytes[cursor+5]));
         }
+        // ZIP 9 marks even STORED files as version 10 (ZIP 1.0),
+        // while Python's ZipInfo constructor sets version needed to 20.
+        // Change only explicitly validated version-needed words and do
+        // not modify ZIP sizes, filenames, payload, CRC or flags.
+        if bytes[cursor+6]!=10 || bytes[cursor+7]!=0 {
+            return Err("Unexpected native ZIP central version-needed".into());
+        }
+        let local=u32::from_le_bytes([
+            bytes[cursor+42],bytes[cursor+43],bytes[cursor+44],bytes[cursor+45]
+        ]) as usize;
+        if local.checked_add(6).is_none_or(|v|v>start)
+            || bytes.get(local..local+4)!=Some(&b"PK\x03\x04"[..])
+            || bytes[local+4]!=10 || bytes[local+5]!=0 {
+            return Err("Unexpected native ZIP local header or version-needed".into());
+        }
+        bytes[local+4]=20;
+        bytes[cursor+6]=20;
         bytes[cursor+4]=20; // Python zipfile: version made by 20
         let filename_len=u16::from_le_bytes([bytes[cursor+28],bytes[cursor+29]]) as usize;
         let extra_len=u16::from_le_bytes([bytes[cursor+30],bytes[cursor+31]]) as usize;
