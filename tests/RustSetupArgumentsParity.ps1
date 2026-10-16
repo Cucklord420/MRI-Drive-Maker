@@ -48,6 +48,43 @@ try {
         }
         $cases++
     }
+    # Negative controls compare the exact PowerShell exception as well as
+    # Rust's nonzero exit and rejection, not just success-path command strings.
+    $negativeCases = @(
+        [pscustomobject]@{ Batch='CON.cmd'; Arguments=@() },
+        [pscustomobject]@{ Batch='tools\COM9.cmd'; Arguments=@() },
+        [pscustomobject]@{ Batch='tools\LPT¹.cmd'; Arguments=@() },
+        [pscustomobject]@{ Batch='tools\..\run.cmd'; Arguments=@() },
+        [pscustomobject]@{ Batch='tools\\run.cmd'; Arguments=@() },
+        [pscustomobject]@{ Batch='tools \run.cmd'; Arguments=@() },
+        [pscustomobject]@{ Batch='run.cmd'; Arguments=@('&& erase') },
+        [pscustomobject]@{ Batch='run.cmd'; Arguments=@('%PATH%') },
+        [pscustomobject]@{ Batch='run.cmd'; Arguments=@('bad|whoami') }
+    )
+    foreach ($case in $negativeCases) {
+        $config = [pscustomobject]@{ SetupBatch=$case.Batch; SetupArguments=@($case.Arguments) }
+        $record = [pscustomobject]@{ Label='MRI_01' }
+        $target = [pscustomobject]@{ Letter='E'; Number=1 }
+        $psError = $null
+        try { [void](Get-MRISetupArguments $config $record $target) }
+        catch { $psError = $_.Exception.Message }
+        if ($null -eq $psError) { throw "The original unexpectedly allowed negative fixture: $($case.Batch)" }
+        $fixture = [ordered]@{
+            Letter='E'; Number=1; Label='MRI_01'
+            SetupBatch=$case.Batch; SetupArguments=@($case.Arguments)
+        }
+        [IO.File]::WriteAllText($temp,
+            (ConvertTo-Json -InputObject $fixture -Compress -Depth 8),
+            [Text.UTF8Encoding]::new($false))
+        $raw = & $binary $temp
+        $exit = $LASTEXITCODE
+        if (-not $raw) { throw "Rust emitted no rejection for $($case.Batch)" }
+        $actual = $raw | Out-String | ConvertFrom-Json
+        if ($exit -eq 0 -or $actual.Ok -or $actual.Error -cne $psError) {
+            throw "Negative fixture mismatch: $($case.Batch), PowerShell=$psError Rust=$($actual.Error)"
+        }
+        $cases++
+    }
     Write-Host "PASS: $cases original PowerShell / Rust CMD argument parity cases (synthetic, read-only)."
 } finally {
     Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
