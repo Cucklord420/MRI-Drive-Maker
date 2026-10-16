@@ -21,7 +21,8 @@ try {
             3 { @('mode=USB', '--drive={DriveLetter}') }
             4 { @('safe', 'fixed.file', '--number={DiskNumber}') }
         }
-        $argsArray = if ($null -eq $arguments) { @() } else { @($arguments) }
+        if ($null -eq $arguments) { $argsArray = [string[]]@() }
+        else { $argsArray = [string[]]@($arguments) }
         $config = [pscustomobject]@{ SetupBatch = $setup; SetupArguments = $argsArray }
         $record = [pscustomobject]@{ Label = $label }
         $target = [pscustomobject]@{ Letter = $letter; Number = $number }
