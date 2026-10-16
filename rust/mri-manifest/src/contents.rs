@@ -127,11 +127,11 @@ mod tests {
     fn empty_and_receipt_decisions_are_fail_closed() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
-        assert_eq!(verify(root, None).unwrap(), false);
+        assert!(!verify(root, None).unwrap());
         fs::write(root.join("bootmgr"), b"known").unwrap();
         assert_eq!(verify(root, None).unwrap_err(), NO_RECEIPT);
         let receipt = json!({"TargetManifest": compute(root, true, false).unwrap()});
-        assert_eq!(verify(root, Some(&receipt)).unwrap(), true);
+        assert!(verify(root, Some(&receipt)).unwrap());
         fs::write(root.join("bootmgr"), b"tampr").unwrap();
         assert_eq!(
             verify(root, Some(&receipt)).unwrap_err(),
