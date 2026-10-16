@@ -99,9 +99,7 @@ fn include_entry(entry: &DirEntry, ignore_system: bool) -> bool {
 fn root_is_physical(path: &Path) -> Result<(), String> {
     let mut parent = Some(path);
     while let Some(next) = parent {
-        if fs::symlink_metadata(next)
-            .is_ok_and(|metadata| has_link_or_reparse(&metadata))
-        {
+        if fs::symlink_metadata(next).is_ok_and(|metadata| has_link_or_reparse(&metadata)) {
             return Err(
                 "Source/target paths cannot pass through links or mounted-directory junctions."
                     .into(),
