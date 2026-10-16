@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::{BufReader, Read};
 use std::path::Path;
-use walkdir::WalkDir;
+use walkdir::{DirEntry, WalkDir};
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
@@ -71,10 +71,38 @@ fn check_path(path: &str) -> Result<(), String> {
     }
     Ok(())
 }
+fn has_link_or_reparse(metadata: &fs::Metadata) -> bool {
+    if metadata.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        // FILE_ATTRIBUTE_REPARSE_POINT: also covers Windows directory junctions.
+        if metadata.file_attributes() & 0x0400 != 0 {
+            return true;
+        }
+    }
+    false
+}
+
+fn include_entry(entry: &DirEntry, ignore_system: bool) -> bool {
+    // PowerShell skips these roots before enumerating their contents. A plain
+    // loop continue still descends into restricted folders.
+    !ignore_system
+        || entry.depth() != 1
+        || !entry.file_name().to_str().is_some_and(|name| {
+            name.eq_ignore_ascii_case("System Volume Information")
+                || name.eq_ignore_ascii_case("$RECYCLE.BIN")
+        })
+}
+
 fn root_is_physical(path: &Path) -> Result<(), String> {
     let mut parent = Some(path);
     while let Some(next) = parent {
-        if fs::symlink_metadata(next).is_ok_and(|m| m.file_type().is_symlink()) {
+        if fs::symlink_metadata(next)
+            .is_ok_and(|metadata| has_link_or_reparse(&metadata))
+        {
             return Err(
                 "Source/target paths cannot pass through links or mounted-directory junctions."
                     .into(),
@@ -91,7 +119,12 @@ pub fn compute(root: &Path, ignore_system: bool, no_hash: bool) -> Result<Manife
     root_is_physical(root)?;
     let mut entries = Vec::<Entry>::new();
     let mut seen = HashSet::new();
-    for item in WalkDir::new(root).min_depth(1).follow_links(false) {
+    for item in WalkDir::new(root)
+        .min_depth(1)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|entry| include_entry(entry, ignore_system))
+    {
         let item = item.map_err(|e| e.to_string())?;
         let path = item.path();
         let relative = path.strip_prefix(root).map_err(|e| e.to_string())?;
@@ -102,22 +135,19 @@ pub fn compute(root: &Path, ignore_system: bool, no_hash: bool) -> Result<Manife
         if parts.is_empty() {
             continue;
         }
-        if ignore_system
-            && ["System Volume Information", "$RECYCLE.BIN"]
-                .iter()
-                .any(|x| parts[0].eq_ignore_ascii_case(x))
-        {
-            continue;
-        }
         let name = parts.join("\\");
         check_path(&name)?;
-        if item.file_type().is_symlink() {
+        let metadata = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+        if has_link_or_reparse(&metadata) {
             return Err(format!("Links are not allowed in media content: {name}"));
+        }
+        if !metadata.is_file() && !metadata.is_dir() {
+            return Err(format!("Unsupported media entry type: {name}"));
         }
         if !seen.insert(name.to_lowercase()) {
             return Err(format!("Case-insensitive path collision: {name}"));
         }
-        let is_directory = item.file_type().is_dir();
+        let is_directory = metadata.is_dir();
         let mut entry = Entry {
             relative_path: name,
             is_directory,
@@ -125,7 +155,7 @@ pub fn compute(root: &Path, ignore_system: bool, no_hash: bool) -> Result<Manife
             sha256: String::new(),
         };
         if !is_directory {
-            let before = fs::metadata(path).map_err(|e| e.to_string())?;
+            let before = metadata;
             entry.length = i64::try_from(before.len())
                 .map_err(|_| "File is too large for signed 64-bit length")?;
             if !no_hash {
