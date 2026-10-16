@@ -22,18 +22,31 @@ fn dotnet_ticks(time: SystemTime) -> i128 {
     }
 }
 
+fn field<'a>(value: &'a Value, name: &str) -> Result<Option<&'a Value>, String> {
+    let object = value.as_object().ok_or("Expected a JSON object")?;
+    // PowerShell PSCustomObject property lookup is case-insensitive.
+    let mut matches = object
+        .iter()
+        .filter(|(key, _)| key.eq_ignore_ascii_case(name));
+    let result = matches.next().map(|(_, value)| value);
+    if matches.next().is_some() {
+        return Err(format!("Duplicate case-insensitive {name} property"));
+    }
+    Ok(result)
+}
+
 fn policy(input: &Value) -> Result<Value, String> {
-    let Some(stamp) = input.get("InputStamp").filter(|v| !v.is_null()) else {
+    let Some(stamp) = field(input, "InputStamp")?.filter(|v| !v.is_null()) else {
         return Ok(json!(true));
     };
-    let path = stamp["Path"]
-        .as_str()
+    let path = field(stamp, "Path")?
+        .and_then(Value::as_str)
         .ok_or("Missing stamped source path")?;
-    let length = stamp["Length"]
-        .as_u64()
+    let length = field(stamp, "Length")?
+        .and_then(Value::as_u64)
         .ok_or("Missing stamped byte length")?;
-    let ticks = stamp["WriteTicks"]
-        .as_i64()
+    let ticks = field(stamp, "WriteTicks")?
+        .and_then(Value::as_i64)
         .ok_or("Missing stamped write ticks")?;
     let meta = std::fs::metadata(path).map_err(|e| e.to_string())?;
     let updated = meta.modified().map_err(|e| e.to_string())?;
@@ -99,6 +112,11 @@ mod tests {
         let fixture = json!({"InputStamp":{"Path":path.to_string_lossy(),
             "Length":meta.len(),"WriteTicks":ticks as i64}});
         assert!(policy(&fixture).is_ok());
+        let folded = json!({"inputstamp": {"PATH":path.to_string_lossy(),
+            "length":meta.len(),"writeticks":ticks as i64}});
+        assert!(policy(&folded).is_ok());
+        let ambiguous = json!({"InputStamp": fixture["InputStamp"], "inputstamp": fixture["InputStamp"]});
+        assert!(policy(&ambiguous).is_err());
         std::fs::write(&path, b"changed size").unwrap();
         assert!(policy(&fixture).is_err());
         assert!(policy(&json!({})).is_ok());
