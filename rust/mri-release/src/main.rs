@@ -10,7 +10,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use zip::{write::FileOptions, CompressionMethod, DateTime, ZipArchive, ZipWriter};
+use zip::{write::SimpleFileOptions, CompressionMethod, DateTime, ZipArchive, ZipWriter};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct Manifest {
@@ -201,7 +201,7 @@ fn build(repo:&Path, path:&Path, version:&str)->Result<Manifest,String>{
     let mut zip=ZipWriter::new(output);
     let date=DateTime::from_date_and_time(2000,1,1,0,0,0)
         .map_err(|_|"Invalid fixed ZIP timestamp")?;
-    let options=FileOptions::default()
+    let options=SimpleFileOptions::default()
         .compression_method(CompressionMethod::Stored)
         .last_modified_time(date)
         .unix_permissions(0o644);
