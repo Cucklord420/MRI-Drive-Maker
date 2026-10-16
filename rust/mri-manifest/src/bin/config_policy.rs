@@ -28,7 +28,7 @@ fn relative_path(path: &str) -> Result<(), String> {
         let device = part.split('.').next().unwrap_or("").to_uppercase();
         let reserved = matches!(device.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CLOCK$")
             || ["COM", "LPT"].iter().any(|prefix| {
-                device.strip_prefix(prefix).is_some_and(|rest| {
+                device.strip_prefix(*prefix).is_some_and(|rest| {
                     matches!(rest, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³")
                 })
             });
