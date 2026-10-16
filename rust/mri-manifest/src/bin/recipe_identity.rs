@@ -114,33 +114,27 @@ mod tests {
 
     #[cfg(windows)]
     fn powershell_oracle(fixture: &Value) -> String {
-        use std::io::Write;
         use std::path::PathBuf;
         use std::process::{Command, Stdio};
 
-        // Compare directly with the original exported Get-MRIRecipe, without
-        // enumerating disks, invoking setup, or touching customer files.
+        // Windows PowerShell 5.1 can decode redirected stdin using a legacy
+        // code page. Pass the small synthetic JSON fixture as a Unicode
+        // -Command argument to preserve non-ASCII parity cases.
         let module = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../MRI.Batch.psm1");
         let escaped_path = module.to_string_lossy().replace('\'', "''");
+        let escaped_json = fixture.to_string().replace('\'', "''");
         let script = format!(
-            "$ErrorActionPreference = 'Stop'; Import-Module '{escaped_path}' -Force -DisableNameChecking; \
-             $fixture = [Console]::In.ReadToEnd() | ConvertFrom-Json; \
+            "$ErrorActionPreference = 'Stop'; \
+             Import-Module '{escaped_path}' -Force -DisableNameChecking; \
+             $fixture = '{escaped_json}' | ConvertFrom-Json; \
              Get-MRIRecipe -Config $fixture.Config -SourceManifest $fixture.SourceManifest"
         );
-        let mut child = Command::new("powershell.exe")
+        let output = Command::new("powershell.exe")
             .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .spawn()
+            .output()
             .expect("original Windows PowerShell reference is required");
-        child
-            .stdin
-            .take()
-            .expect("PowerShell stdin")
-            .write_all(fixture.to_string().as_bytes())
-            .expect("write synthetic fixture");
-        let output = child.wait_with_output().expect("PowerShell reference completes");
         assert!(
             output.status.success(),
             "PowerShell original failed: {}",
