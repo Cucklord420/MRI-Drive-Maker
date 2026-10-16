@@ -79,7 +79,8 @@ pub(crate) fn verify(root: &Path, receipt: Option<&Value>) -> Result<bool, Strin
     }
 
     // The cheap no-hash guard is complete. Only now inspect file contents
-    // already named and size-matched in the authenticated receipt.
+    // already named and size-matched in the caller-supplied receipt. The
+    // calling workflow must authenticate it separately.
     let mut paths = Vec::with_capacity(previous.len());
     for item in previous {
         let relative = item
