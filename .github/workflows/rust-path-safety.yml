@@ -12,6 +12,11 @@ on:
 permissions:
   contents: read
 
+# Coalesce branch pushes and PR checks; never let outdated runs bury final-head checks.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
 jobs:
   relative-path-policy:
     runs-on: windows-latest
