@@ -17,7 +17,12 @@ fn policy(input: &Value) -> Result<Value, String> {
         return Err("StablePolls must be at least 2".into());
     }
 
-    let mut tracker = input["Tracker"].as_object().cloned().unwrap_or_default();
+    // Silently replacing a malformed persisted tracker with an empty one can
+    // hide identity/state corruption. Only a real empty object starts fresh.
+    let mut tracker = input["Tracker"]
+        .as_object()
+        .ok_or("Missing or invalid Tracker")?
+        .clone();
     let mut present = HashSet::new();
     let mut ready = Vec::new();
 
@@ -25,7 +30,12 @@ fn policy(input: &Value) -> Result<Value, String> {
         let Some(key) = drive["Key"].as_str().filter(|s| !s.is_empty()) else {
             continue;
         };
-        present.insert(key.to_lowercase());
+        // A physical identity must be observed at most once in a poll. The
+        // block decision is supplied externally; reject duplicate identities
+        // even if a caller incorrectly marks both entries unblocked.
+        if !present.insert(key.to_lowercase()) {
+            return Err("Ambiguous duplicate inventory identity".into());
+        }
         let number = drive["Number"].as_i64().ok_or("Missing drive Number")?;
         let blocked = drive["Blocked"]
             .as_bool()
@@ -48,6 +58,14 @@ fn policy(input: &Value) -> Result<Value, String> {
         let mut state = tracker.get(&storage_key).cloned().unwrap_or_else(|| {
             json!({"Number":number,"Stable":0,"Attempted":false})
         });
+        // Treat tracker state as untrusted persisted input rather than
+        // accepting silently coerced counts or attempted flags.
+        if state["Number"].as_i64().is_none()
+            || !state["Stable"].as_i64().is_some_and(|stable| stable >= 0)
+            || state["Attempted"].as_bool().is_none()
+        {
+            return Err("Malformed tracker state".into());
+        }
 
         if state["Number"] != number {
             state["Number"] = json!(number);
@@ -167,6 +185,44 @@ mod tests {
             policy(&input).unwrap_err(),
             "Missing validated drive Blocked decision"
         );
+    }
+
+    #[test]
+    fn duplicate_inventory_identity_cannot_count_as_two_stable_polls() {
+        let input = json!({
+            "Inventory":[
+                {"Key":"disk-x","Number":7,"Blocked":false},
+                {"Key":"DISK-X","Number":7,"Blocked":false}
+            ],
+            "Records":[{"Key":"disk-x","Label":"MRI_01"}],
+            "StablePolls":3,
+            "Tracker":{"disk-x":{"Number":7,"Stable":1,"Attempted":false}}
+        });
+        assert_eq!(
+            policy(&input).unwrap_err(),
+            "Ambiguous duplicate inventory identity"
+        );
+    }
+
+    #[test]
+    fn malformed_persisted_tracker_is_rejected() {
+        let mut input = json!({
+            "Inventory":[{"Key":"disk-x","Number":7,"Blocked":false}],
+            "Records":[{"Key":"disk-x","Label":"MRI_01"}],
+            "StablePolls":2,
+            "Tracker":null
+        });
+        assert_eq!(policy(&input).unwrap_err(), "Missing or invalid Tracker");
+        input["Tracker"] = json!({
+            "disk-x":{"Number":7,"Stable":1,"Attempted":"false"}
+        });
+        assert_eq!(policy(&input).unwrap_err(), "Malformed tracker state");
+        input["Tracker"]["disk-x"]["Attempted"] = json!(false);
+        input["Tracker"]["disk-x"]["Stable"] = json!(-1);
+        assert_eq!(policy(&input).unwrap_err(), "Malformed tracker state");
+        input["Tracker"]["disk-x"]["Stable"] = json!(1);
+        input["Tracker"]["disk-x"]["Number"] = Value::Null;
+        assert_eq!(policy(&input).unwrap_err(), "Malformed tracker state");
     }
 
     #[test]
