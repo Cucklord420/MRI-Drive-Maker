@@ -18,8 +18,6 @@ fn policy(input: &Value) -> Result<Value, String> {
         "MutableFiles",
     ];
     let mut fields = Map::new();
-    // The insertion order must match the original ordered PowerShell hashtable.
-    // This crate must retain serde_json's preserve_order feature.
     fields.insert("Version".into(), json!(2));
     for key in keys {
         let value = config
@@ -34,6 +32,8 @@ fn policy(input: &Value) -> Result<Value, String> {
             .ok_or("Missing source digest")?
             .clone(),
     );
+    // The manifest enables serde_json/preserve_order. PowerShell hashes an
+    // ordered [ordered] hashtable; a key-sorting Map changes every recipe ID.
     let data = serde_json::to_string(&Value::Object(fields)).map_err(|e| e.to_string())?;
     Ok(json!(format!("{:X}", Sha256::digest(data.as_bytes()))))
 }
@@ -65,10 +65,19 @@ mod tests {
     use super::*;
 
     fn fixture() -> Value {
-        json!({"Config":{"PrepareDisk":true,"FileSystem":"FAT32",
-            "SetupBatch":"","SetupArguments":[],"SetupInteractive":false,
-            "RequiredFiles":["bootmgr"],"MutableFiles":[],"MaxParallel":10},
-            "SourceManifest":{"Digest":"FAKE_SOURCE_HASH"}})
+        json!({
+            "Config": {
+                "PrepareDisk": true,
+                "FileSystem": "FAT32",
+                "SetupBatch": "",
+                "SetupArguments": [],
+                "SetupInteractive": false,
+                "RequiredFiles": ["bootmgr"],
+                "MutableFiles": [],
+                "MaxParallel": 10
+            },
+            "SourceManifest": {"Digest": "FAKE_SOURCE_HASH"}
+        })
     }
 
     #[test]
@@ -83,14 +92,12 @@ mod tests {
     }
 
     #[test]
-    fn preserves_powershell_property_order_in_recipe_hash() {
-        // Exact compact JSON shape of Get-MRIRecipe's [ordered]@{} fixture.
-        // Changing serde_json features or field insertion order must fail here.
-        let serialized = concat!(
-            r#"{"Version":2,"PrepareDisk":true,"FileSystem":"FAT32","SetupBatch":"","SetupArguments":[],"SetupInteractive":false,"RequiredFiles":["bootmgr"],"MutableFiles":[],"SourceDigest":"FAKE_SOURCE_HASH"}"#
+    fn ordered_payload_has_stable_digest() {
+        // Hash of the original PowerShell field order and compact JSON bytes.
+        assert_eq!(
+            policy(&fixture()).unwrap(),
+            json!("9596912B27B954DD468A179C3CCA649A3420FCF4D9C8FDB3810B7095D6B29674")
         );
-        let expected = format!("{:X}", Sha256::digest(serialized.as_bytes()));
-        assert_eq!(policy(&fixture()).unwrap(), json!(expected));
     }
 
     #[test]
