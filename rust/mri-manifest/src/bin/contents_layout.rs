@@ -27,8 +27,19 @@ fn policy(input: &Value) -> Result<Value, String> {
     for entry in old {
         let path = entry["RelativePath"]
             .as_str()
+            .filter(|path| !path.is_empty())
             .ok_or("Malformed receipt path")?;
-        expected.insert(path.to_lowercase(), entry);
+        if entry["IsDirectory"].as_bool().is_none()
+            || !entry["Length"].as_i64().is_some_and(|length| length >= 0)
+        {
+            return Err(MISSING_OR_EXTRA.into());
+        }
+        // A receipt manifest from Get-MRIManifest never contains duplicate
+        // case-insensitive paths. Refuse ambiguous injected manifests rather
+        // than allowing a later duplicate to replace the first entry.
+        if expected.insert(path.to_lowercase(), entry).is_some() {
+            return Err(MISSING_OR_EXTRA.into());
+        }
     }
     if expected.len() != current.len() {
         return Err(MISSING_OR_EXTRA.into());
@@ -40,7 +51,13 @@ fn policy(input: &Value) -> Result<Value, String> {
     for entry in current {
         let path = entry["RelativePath"]
             .as_str()
+            .filter(|path| !path.is_empty())
             .ok_or("Malformed target path")?;
+        if entry["IsDirectory"].as_bool().is_none()
+            || !entry["Length"].as_i64().is_some_and(|length| length >= 0)
+        {
+            return Err(UNEXPECTED.into());
+        }
         let key = path.to_lowercase();
         if !seen_current.insert(key.clone()) {
             return Err(UNEXPECTED.into());
@@ -115,6 +132,31 @@ mod tests {
             vec![original, duplicate],
         );
         assert_eq!(policy(&fixture).unwrap_err(), MISSING_OR_EXTRA);
+    }
+
+    #[test]
+    fn duplicated_receipt_path_is_rejected_even_when_unique_count_matches() {
+        let boot = entry("EFI\\BOOT\\BOOTX64.EFI", 300);
+        let input = input(
+            vec![boot.clone()],
+            vec![boot.clone(), entry("efi\\boot\\bootx64.efi", 300)],
+        );
+        assert_eq!(policy(&input).unwrap_err(), MISSING_OR_EXTRA);
+    }
+
+    #[test]
+    fn malformed_entry_schema_does_not_authorize_existing_media_reuse() {
+        let boot = entry("EFI\\BOOT\\BOOTX64.EFI", 300);
+        let mut fixture = input(vec![boot.clone()], vec![boot.clone()]);
+        fixture["Receipt"]["TargetManifest"]["Entries"][0]["Length"] = Value::Null;
+        assert_eq!(policy(&fixture).unwrap_err(), MISSING_OR_EXTRA);
+
+        let mut fixture = input(vec![boot.clone()], vec![boot]);
+        fixture["CurrentEntries"][0]["IsDirectory"] = json!("false");
+        assert_eq!(policy(&fixture).unwrap_err(), UNEXPECTED);
+        fixture["CurrentEntries"][0]["IsDirectory"] = json!(false);
+        fixture["CurrentEntries"][0]["Length"] = json!(-1);
+        assert_eq!(policy(&fixture).unwrap_err(), UNEXPECTED);
     }
 
     #[test]
