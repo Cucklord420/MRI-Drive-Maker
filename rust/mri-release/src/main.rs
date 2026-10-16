@@ -128,7 +128,7 @@ fn normalize_zip_creator_version(path:&Path)->Result<(),String>{
             return Err("Invalid ZIP central-directory header".into());
         }
         if bytes[cursor+4]!=46 || bytes[cursor+5]!=3 {
-            return Err("Unexpected native ZIP creator platform/version".into());
+            return Err(format!("Unexpected native ZIP creator platform/version: {}/{}", bytes[cursor+4], bytes[cursor+5]));
         }
         bytes[cursor+4]=20; // Python zipfile: version made by 20
         let filename_len=u16::from_le_bytes([bytes[cursor+28],bytes[cursor+29]]) as usize;
