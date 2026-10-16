@@ -11,7 +11,7 @@ $temporary=Join-Path $env:TEMP ('mri-contents-safe-'+[guid]::NewGuid().ToString(
 $cases=0
 try {
     for($n=0;$n -lt 60;$n++) {
-        for($variant=0;$variant -lt 12;$variant++) {
+        for($variant=0;$variant -lt 13;$variant++) {
             $root=Join-Path $temporary ('case-{0:D3}-{1:D2}' -f $n,$variant)
             $nested=Join-Path $root 'EFI/BOOT'
             [IO.Directory]::CreateDirectory($nested)|Out-Null
@@ -55,6 +55,11 @@ try {
                 10 {[IO.Directory]::CreateDirectory((Join-Path $root 'rogue-directory'))|Out-Null}
                 11 {
                     $receipt.TargetManifest.Entries=@($receipt.TargetManifest.Entries | Where-Object { $_.RelativePath -ne 'bootmgr' })
+                }
+                12 {
+                    foreach($entry in @($receipt.TargetManifest.Entries)) {
+                        if (-not $entry.IsDirectory) { $entry.Sha256=([string]$entry.Sha256).ToLowerInvariant() }
+                    }
                 }
             }
             $receiptFile='-'
