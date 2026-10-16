@@ -136,7 +136,10 @@ mod tests {
         // Windows PowerShell compares SHA-256 strings case-insensitively.
         // A lowercase hexadecimal receipt is still the same valid digest.
         let mut lower_receipt = receipt.clone();
-        for entry in lower_receipt["TargetManifest"]["Entries"].as_array_mut().unwrap() {
+        for entry in lower_receipt["TargetManifest"]["Entries"]
+            .as_array_mut()
+            .unwrap()
+        {
             let lower = entry["Sha256"].as_str().map(str::to_ascii_lowercase);
             if let Some(lower) = lower {
                 entry["Sha256"] = Value::String(lower);
@@ -157,7 +160,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
         fs::create_dir(root.join("System Volume Information")).unwrap();
-        fs::write(root.join("System Volume Information").join("ignored"), b"data").unwrap();
+        fs::write(
+            root.join("System Volume Information").join("ignored"),
+            b"data",
+        )
+        .unwrap();
         assert_eq!(verify(root, None).unwrap(), false);
         fs::write(root.join("bootmgr"), b"known").unwrap();
         let receipt = json!({"TargetManifest": compute(root, true, false).unwrap()});
