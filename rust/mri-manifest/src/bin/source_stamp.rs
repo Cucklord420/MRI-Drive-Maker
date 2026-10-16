@@ -1,7 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Read-only Rust policy port; the existing PowerShell production code stays intact.
 use serde_json::{json, Value};
-use std::time::UNIX_EPOCH;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Convert a UTC file timestamp into .NET DateTime ticks (100ns since year 1).
+/// A Windows file may legitimately be stamped before the Unix epoch.
+fn dotnet_ticks(time: SystemTime) -> i128 {
+    const UNIX_EPOCH_TICKS: i128 = 621_355_968_000_000_000;
+    match time.duration_since(UNIX_EPOCH) {
+        Ok(duration) => {
+            UNIX_EPOCH_TICKS
+                + i128::from(duration.as_secs()) * 10_000_000
+                + i128::from(duration.subsec_nanos() / 100)
+        }
+        Err(error) => {
+            let duration = error.duration();
+            UNIX_EPOCH_TICKS
+                - i128::from(duration.as_secs()) * 10_000_000
+                - i128::from(duration.subsec_nanos() / 100)
+        }
+    }
+}
 
 fn policy(input: &Value) -> Result<Value, String> {
     let Some(stamp) = input.get("InputStamp").filter(|v| !v.is_null()) else {
@@ -18,13 +37,7 @@ fn policy(input: &Value) -> Result<Value, String> {
         .ok_or("Missing stamped write ticks")?;
     let meta = std::fs::metadata(path).map_err(|e| e.to_string())?;
     let updated = meta.modified().map_err(|e| e.to_string())?;
-    let diff = updated
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| e.to_string())?;
-    const EPOCH_TICKS: i128 = 621355968000000000;
-    let actual = EPOCH_TICKS
-        + (i128::from(diff.as_secs()) * 10_000_000)
-        + i128::from(diff.subsec_nanos() / 100);
+    let actual = dotnet_ticks(updated);
     if meta.len() != length || actual != i128::from(ticks) {
         Err("The input ISO/ZIP changed during this session. Restart the watcher.".into())
     } else {
@@ -58,15 +71,31 @@ fn main() {
 mod tests {
     use super::*;
     #[test]
+    fn supports_dotnet_file_timestamps_before_unix_epoch() {
+        use std::time::Duration;
+
+        assert_eq!(dotnet_ticks(UNIX_EPOCH), 621_355_968_000_000_000);
+        assert_eq!(
+            dotnet_ticks(UNIX_EPOCH - Duration::from_secs(1)),
+            621_355_967_990_000_000
+        );
+        assert_eq!(
+            dotnet_ticks(UNIX_EPOCH + Duration::from_millis(1500)),
+            621_355_968_015_000_000
+        );
+        assert_eq!(
+            dotnet_ticks(UNIX_EPOCH - Duration::from_millis(1500)),
+            621_355_967_985_000_000
+        );
+    }
+
+    #[test]
     fn stamped_identity_detects_changed_size_and_time() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("source.zip");
         std::fs::write(&path, b"original").unwrap();
         let meta = std::fs::metadata(&path).unwrap();
-        let diff = meta.modified().unwrap().duration_since(UNIX_EPOCH).unwrap();
-        let ticks = 621355968000000000_i128
-            + i128::from(diff.as_secs()) * 10000000
-            + i128::from(diff.subsec_nanos() / 100);
+        let ticks = dotnet_ticks(meta.modified().unwrap());
         let fixture = json!({"InputStamp":{"Path":path.to_string_lossy(),
             "Length":meta.len(),"WriteTicks":ticks as i64}});
         assert!(policy(&fixture).is_ok());
