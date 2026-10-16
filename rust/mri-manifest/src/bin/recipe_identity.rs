@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Pure-data MRI policy migration; requires independent PowerShell acceptance.
-use serde_json::Map;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
 fn policy(input: &Value) -> Result<Value, String> {
@@ -19,6 +18,8 @@ fn policy(input: &Value) -> Result<Value, String> {
         "MutableFiles",
     ];
     let mut fields = Map::new();
+    // The insertion order must match the original ordered PowerShell hashtable.
+    // This crate must retain serde_json's preserve_order feature.
     fields.insert("Version".into(), json!(2));
     for key in keys {
         let value = config
@@ -58,15 +59,18 @@ fn main() {
         }
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
     fn fixture() -> Value {
         json!({"Config":{"PrepareDisk":true,"FileSystem":"FAT32",
             "SetupBatch":"","SetupArguments":[],"SetupInteractive":false,
             "RequiredFiles":["bootmgr"],"MutableFiles":[],"MaxParallel":10},
             "SourceManifest":{"Digest":"FAKE_SOURCE_HASH"}})
     }
+
     #[test]
     fn operational_changes_do_not_change_media_recipe() {
         let mut a = fixture();
@@ -77,6 +81,18 @@ mod tests {
         a["SourceManifest"]["Digest"] = json!("CHANGED");
         assert_ne!(policy(&a).unwrap(), reference);
     }
+
+    #[test]
+    fn preserves_powershell_property_order_in_recipe_hash() {
+        // Exact compact JSON shape of Get-MRIRecipe's [ordered]@{} fixture.
+        // Changing serde_json features or field insertion order must fail here.
+        let serialized = concat!(
+            r#"{"Version":2,"PrepareDisk":true,"FileSystem":"FAT32","SetupBatch":"","SetupArguments":[],"SetupInteractive":false,"RequiredFiles":["bootmgr"],"MutableFiles":[],"SourceDigest":"FAKE_SOURCE_HASH"}"#
+        );
+        let expected = format!("{:X}", Sha256::digest(serialized.as_bytes()));
+        assert_eq!(policy(&fixture()).unwrap(), json!(expected));
+    }
+
     #[test]
     fn missing_required_fields_fail() {
         assert!(policy(&json!({"Config":{},"SourceManifest":{}})).is_err());
