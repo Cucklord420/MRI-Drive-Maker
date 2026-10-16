@@ -37,6 +37,6 @@ jobs:
       - name: Compare 600 final-manifest match decisions with real Assert-MRIManifestMatch
         shell: powershell
         run: ./tests/RustManifestMatchParity.ps1
-      - name: Compare 720 existing-media receipt safety decisions with original PowerShell
+      - name: Compare 780 existing-media receipt safety decisions with original PowerShell
         shell: powershell
         run: ./tests/RustContentsSafeParity.ps1
