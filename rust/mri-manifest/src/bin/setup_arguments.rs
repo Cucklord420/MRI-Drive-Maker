@@ -4,35 +4,51 @@ use serde_json::{json, Value};
 
 
 fn policy(input: &Value) -> Result<Value, String> {
-    let letter=input["Letter"].as_str().ok_or("Missing target letter")?;
-    let number=input["Number"].as_i64().ok_or("Missing disk number")?;
-    let label=input["Label"].as_str().ok_or("Missing record label")?;
-    let setup=input["SetupBatch"].as_str().ok_or("Missing SetupBatch")?;
-    if letter.len()!=1 || !letter.bytes().all(|b|b.is_ascii_alphabetic()) {
+    let letter = input["Letter"].as_str().ok_or("Missing target letter")?;
+    let number = input["Number"].as_i64().ok_or("Missing disk number")?;
+    let label = input["Label"].as_str().ok_or("Missing record label")?;
+    let setup = input["SetupBatch"].as_str().ok_or("Missing SetupBatch")?;
+    if letter.len() != 1 || !letter.bytes().all(|b| b.is_ascii_alphabetic()) {
         return Err("Missing valid target drive letter".into());
     }
-    let folder=setup.replace('/',"\\");
-    if folder.is_empty()||folder.starts_with('\\')||folder.contains(':')
-        ||folder.split('\\').any(|p|p.is_empty()||p=="."||p=="..")
-        ||folder.chars().any(|c|c.is_control()||"*?\"<>|".contains(c)){
+    let folder = setup.replace('/', "\\");
+    if folder.is_empty()
+        || folder.starts_with('\\')
+        || folder.contains(':')
+        || folder.split('\\').any(|p| p.is_empty() || p == "." || p == "..")
+        || folder
+            .chars()
+            .any(|c| c.is_control() || "*?\"<>|".contains(c))
+    {
         return Err("A relative file path is required".into());
     }
-    let args=input["SetupArguments"].as_array().ok_or("Missing setup arguments")?;
-    let mut expanded=Vec::new();
+    let args = input["SetupArguments"]
+        .as_array()
+        .ok_or("Missing setup arguments")?;
+    let mut expanded = Vec::new();
     for arg in args {
-        let raw=arg.as_str().ok_or("Batch argument must be a string")?;
-        let value=raw.replace("{DriveLetter}",letter)
-            .replace("{DriveRoot}",&format!("{letter}:\\"))
-            .replace("{DiskNumber}",&number.to_string())
-            .replace("{Label}",label);
-        if !value.chars().all(|c|c.is_ascii_alphanumeric()
-            ||"_ .:/\\=+,-".contains(c)){
+        let raw = arg.as_str().ok_or("Batch argument must be a string")?;
+        let value = raw
+            .replace("{DriveLetter}", letter)
+            .replace("{DriveRoot}", &format!("{letter}:\\"))
+            .replace("{DiskNumber}", &number.to_string())
+            .replace("{Label}", label);
+        if !value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "_ .:/\\=+,-".contains(c))
+        {
             return Err("Unsafe expanded batch argument.".into());
         }
         expanded.push(format!("\"{value}\""));
     }
-    let cmd=format!("/d /s /c \"\"{letter}:\\{folder}\"{}\"",
-        if expanded.is_empty(){String::new()}else{format!(" {}",expanded.join(" "))});
+    let cmd = format!(
+        "/d /s /c \"\"{letter}:\\{folder}\"{}\"",
+        if expanded.is_empty() {
+            String::new()
+        } else {
+            format!(" {}", expanded.join(" "))
+        }
+    );
     Ok(json!(cmd))
 }
 
@@ -63,10 +79,11 @@ mod tests {
     use super::*;
     #[test]
     fn expands_original_placeholders_and_quotes() {
-        let result=policy(&json!({"Letter":"E","Number":7,"Label":"MRI_07",
+        let result = policy(&json!({"Letter":"E","Number":7,"Label":"MRI_07",
             "SetupBatch":"tools/setup.cmd",
-            "SetupArguments":["--disk={DiskNumber}","--root={DriveRoot}","--label={Label}"]})).unwrap();
-        let actual=result.as_str().unwrap();
+            "SetupArguments":["--disk={DiskNumber}","--root={DriveRoot}","--label={Label}"]}))
+        .unwrap();
+        let actual = result.as_str().unwrap();
         assert!(actual.contains("E:\\tools\\setup.cmd"));
         assert!(actual.contains("\"--disk=7\""));
         assert!(actual.contains("\"--root=E:\\\""));
@@ -74,9 +91,10 @@ mod tests {
     }
     #[test]
     fn refuses_cmd_injection_after_expansion() {
-        for arg in ["&& erase","{Label}&", "%PATH%","| whoami"] {
+        for arg in ["&& erase", "{Label}&", "%PATH%", "| whoami"] {
             assert!(policy(&json!({"Letter":"E","Number":1,"Label":"MRI_01",
-            "SetupBatch":"setup.cmd","SetupArguments":[arg]})).is_err());
+            "SetupBatch":"setup.cmd","SetupArguments":[arg]}))
+            .is_err());
         }
     }
 }
