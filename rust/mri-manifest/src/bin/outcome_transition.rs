@@ -17,8 +17,11 @@ fn policy(input: &Value) -> Result<Value, String> {
     };
     drop_key(&mut ready);
     drop_key(&mut failed);
-    if success { ready.insert(key.into(),json!(label)); }
-    else { failed.insert(key.into(),json!(label)); }
+    if success {
+        ready.insert(key.into(), json!(label));
+    } else {
+        failed.insert(key.into(), json!(label));
+    }
     Ok(json!({"Ready":ready,"Failed":failed}))
 }
 
