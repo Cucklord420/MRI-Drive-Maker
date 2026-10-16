@@ -31,6 +31,18 @@ fn policy(input: &Value) -> Result<Value, String> {
         {
             return Err("Executable must be a safe relative path below System32".into());
         }
+        // Match the Windows reserved-device protections used elsewhere in the
+        // original MRI path validator; never resolve a device alias as a tool.
+        let stem = part.split('.').next().unwrap_or("").to_uppercase();
+        let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CLOCK$")
+            || ["COM", "LPT"].iter().any(|prefix| {
+                stem.strip_prefix(prefix).is_some_and(|suffix| {
+                    matches!(suffix, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³")
+                })
+            });
+        if reserved {
+            return Err("Executable must be a safe relative path below System32".into());
+        }
         resolved.push(part);
     }
     Ok(json!(resolved.to_string_lossy()))
@@ -94,6 +106,7 @@ mod tests {
             "dir\\trailing. ",
             "dir\\pipe|bad.exe",
             "dir\\bad?.exe",
+            "CON.exe", "AUX.cmd", "LPT1.exe", "COM¹.exe", "folder/NUL.bat",
         ] {
             assert!(
                 policy(&json!({"SystemRoot":"C:\\Windows","Name":name})).is_err(),
