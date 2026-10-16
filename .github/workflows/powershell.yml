@@ -20,9 +20,9 @@ on:
 permissions:
   contents: read
 
-# Coalesce branch pushes and PR checks; never let outdated runs bury final-head checks.
+# Cancel superseded runs per event; keep push and pull_request checks independent.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || 'automatic' }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || 'automatic' }}
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
