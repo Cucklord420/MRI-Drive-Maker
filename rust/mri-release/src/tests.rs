@@ -15,10 +15,10 @@ fn members(path:&Path)->IndexMap<String,(Vec<u8>,(u16,u8,u8,u8,u8,u8))>{
     let mut result=IndexMap::new();
     for n in 0..zip.len() {
         let mut member=zip.by_index(n).unwrap();
-        let date=member.last_modified();
+        let date=member.last_modified().expect("Missing ZIP member timestamp");
         let meta=(date.year(),date.month(),date.day(),
             date.hour(),date.minute(),date.second());
-        let name=member.name().to_owned();
+        let name=member.name().unwrap().into_owned();
         let mut bytes=Vec::new();
         member.read_to_end(&mut bytes).unwrap();
         assert_eq!(member.compression(),CompressionMethod::Stored);
