@@ -12,16 +12,19 @@ fn relative_path(path: &str) -> Result<(), String> {
     if normalized.trim().is_empty()
         || normalized.starts_with('\\')
         || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
-        || normalized.chars().any(|ch| {
-            (ch as u32) <= 0x1f || matches!(ch, ':' | '*' | '?' | '"' | '<' | '>' | '|')
-        })
+        || normalized
+            .chars()
+            .any(|ch| (ch as u32) <= 0x1f || matches!(ch, ':' | '*' | '?' | '"' | '<' | '>' | '|'))
     {
         return Err(format!("A relative file path is required: {path}"));
     }
 
     for part in normalized.split('\\') {
-        if part.is_empty() || part == "." || part == ".."
-            || part.ends_with(' ') || part.ends_with('.')
+        if part.is_empty()
+            || part == "."
+            || part == ".."
+            || part.ends_with(' ')
+            || part.ends_with('.')
         {
             return Err(format!("Unsafe relative file path: {path}"));
         }
@@ -29,7 +32,10 @@ fn relative_path(path: &str) -> Result<(), String> {
         let reserved = matches!(device.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CLOCK$")
             || ["COM", "LPT"].iter().any(|prefix| {
                 device.strip_prefix(*prefix).is_some_and(|rest| {
-                    matches!(rest, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³")
+                    matches!(
+                        rest,
+                        "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                    )
                 })
             });
         if reserved {
@@ -43,18 +49,35 @@ fn strings<'a>(input: &'a Value, name: &str) -> Result<Vec<&'a str>, String> {
     let values = input[name]
         .as_array()
         .ok_or_else(|| format!("{name} must be an array."))?;
-    values.iter().map(|value| {
-        value.as_str().ok_or_else(|| format!("{name} must contain strings."))
-    }).collect()
+    values
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .ok_or_else(|| format!("{name} must contain strings."))
+        })
+        .collect()
 }
 
 fn policy(input: &Value) -> Result<Value, String> {
     let names = [
-        "SchemaVersion", "SourcePath", "SetupBatch", "SetupArguments",
-        "SetupInteractive", "SetupTimeoutSeconds", "CopyTimeoutSeconds",
-        "PrepareDisk", "FileSystem", "RequiredFiles", "MutableFiles",
-        "MaxParallel", "PollSeconds", "StablePolls", "MinimumDiskBytes",
-        "MaximumDiskBytes", "SerializeSetup",
+        "SchemaVersion",
+        "SourcePath",
+        "SetupBatch",
+        "SetupArguments",
+        "SetupInteractive",
+        "SetupTimeoutSeconds",
+        "CopyTimeoutSeconds",
+        "PrepareDisk",
+        "FileSystem",
+        "RequiredFiles",
+        "MutableFiles",
+        "MaxParallel",
+        "PollSeconds",
+        "StablePolls",
+        "MinimumDiskBytes",
+        "MaximumDiskBytes",
+        "SerializeSetup",
     ];
     for field in names {
         if input.get(field).is_none() {
@@ -67,18 +90,28 @@ fn policy(input: &Value) -> Result<Value, String> {
     // PowerShell's -in/-notin and -eq string checks are case-insensitive.
     let kind = match input.get("SourceKind") {
         None => "Folder",
-        Some(value) => value.as_str().ok_or("SourceKind must be Folder, ISO, or ZIP.")?,
+        Some(value) => value
+            .as_str()
+            .ok_or("SourceKind must be Folder, ISO, or ZIP.")?,
     };
-    if !["Folder", "ISO", "ZIP"].iter().any(|v| kind.eq_ignore_ascii_case(v)) {
+    if !["Folder", "ISO", "ZIP"]
+        .iter()
+        .any(|v| kind.eq_ignore_ascii_case(v))
+    {
         return Err("SourceKind must be Folder, ISO, or ZIP.".into());
     }
-    if input["SourcePath"].as_str().is_none_or(|s| s.trim().is_empty()) {
+    if input["SourcePath"]
+        .as_str()
+        .is_none_or(|s| s.trim().is_empty())
+    {
         return Err("Select the official MRI ISO, ZIP, or extracted folder first.".into());
     }
     // Deliberately NOT a full replacement for Assert-MRIConfig: the production
     // PowerShell must still verify the selected source exists and is the correct
     // kind, and that a nonempty setup script actually exists and is nonempty.
-    let setup_batch = input["SetupBatch"].as_str().ok_or("SetupBatch must be a string.")?;
+    let setup_batch = input["SetupBatch"]
+        .as_str()
+        .ok_or("SetupBatch must be a string.")?;
     let setup_args = strings(input, "SetupArguments")?;
     let mutable = strings(input, "MutableFiles")?;
     let required = strings(input, "RequiredFiles")?;
@@ -86,13 +119,13 @@ fn policy(input: &Value) -> Result<Value, String> {
         relative_path(setup_batch)?;
         let lower = setup_batch.to_ascii_lowercase();
         if !(lower.ends_with(".bat") || lower.ends_with(".cmd"))
-            || setup_batch.chars().any(|ch| matches!(ch, '%' | '!' | '&' | '^' | '(' | ')'))
+            || setup_batch
+                .chars()
+                .any(|ch| matches!(ch, '%' | '!' | '&' | '^' | '(' | ')'))
         {
             return Err("Choose a .bat/.cmd path without CMD metacharacters.".into());
         }
-    } else if !setup_args.is_empty() || !mutable.is_empty()
-        || input["SetupInteractive"] == true
-    {
+    } else if !setup_args.is_empty() || !mutable.is_empty() || input["SetupInteractive"] == true {
         return Err("Direct-copy mode must have no setup arguments, mutable-file exceptions, or interactive setup.".into());
     }
     for item in required.iter().chain(mutable.iter()) {
@@ -106,7 +139,10 @@ fn policy(input: &Value) -> Result<Value, String> {
         let remainder = placeholder.replace_all(arg, "");
         if remainder.chars().any(|ch| {
             !ch.is_ascii_alphanumeric()
-                && !matches!(ch, '_' | ' ' | '.' | ':' | '/' | '\\' | '=' | '+' | ',' | '-')
+                && !matches!(
+                    ch,
+                    '_' | ' ' | '.' | ':' | '/' | '\\' | '=' | '+' | ',' | '-'
+                )
         }) {
             return Err(format!("Unsupported batch argument: {arg}"));
         }
@@ -116,12 +152,20 @@ fn policy(input: &Value) -> Result<Value, String> {
             return Err(format!("{field} must be true or false."));
         }
     }
-    if !input["FileSystem"].as_str().is_some_and(|s| s.eq_ignore_ascii_case("FAT32")) {
+    if !input["FileSystem"]
+        .as_str()
+        .is_some_and(|s| s.eq_ignore_ascii_case("FAT32"))
+    {
         return Err("This media recipe supports FAT32 only.".into());
     }
     for field in [
-        "MaxParallel", "PollSeconds", "StablePolls", "MinimumDiskBytes",
-        "MaximumDiskBytes", "SetupTimeoutSeconds", "CopyTimeoutSeconds",
+        "MaxParallel",
+        "PollSeconds",
+        "StablePolls",
+        "MinimumDiskBytes",
+        "MaximumDiskBytes",
+        "SetupTimeoutSeconds",
+        "CopyTimeoutSeconds",
     ] {
         if input[field].as_i64().is_none() {
             return Err(format!("{field} must be an integer."));
@@ -137,8 +181,7 @@ fn policy(input: &Value) -> Result<Value, String> {
         return Err("Use PollSeconds 1-30 and StablePolls 2-30.".into());
     }
     if input["MinimumDiskBytes"].as_i64().unwrap() < 1
-        || input["MaximumDiskBytes"].as_i64().unwrap()
-            < input["MinimumDiskBytes"].as_i64().unwrap()
+        || input["MaximumDiskBytes"].as_i64().unwrap() < input["MinimumDiskBytes"].as_i64().unwrap()
     {
         return Err("Invalid capacity limits.".into());
     }
@@ -226,9 +269,18 @@ mod tests {
             v["SourceKind"] = json!(bad);
             assert!(policy(&v).is_err(), "kind {bad}");
         }
-        for bad in ["..\\escape.cmd", "C:\\Setup.cmd", "\\network.cmd",
-                    "CON.cmd", "LPT¹.bat", "foo\\.\\bar.cmd", "setup.exe",
-                    "setup&delete.cmd", "foo//setup.cmd", "foo \\setup.cmd"] {
+        for bad in [
+            "..\\escape.cmd",
+            "C:\\Setup.cmd",
+            "\\network.cmd",
+            "CON.cmd",
+            "LPT¹.bat",
+            "foo\\.\\bar.cmd",
+            "setup.exe",
+            "setup&delete.cmd",
+            "foo//setup.cmd",
+            "foo \\setup.cmd",
+        ] {
             let mut v = base();
             v["SetupBatch"] = json!(bad);
             assert!(policy(&v).is_err(), "setup path {bad}");
@@ -246,8 +298,17 @@ mod tests {
             v[field] = value;
             assert!(policy(&v).is_err(), "direct copy {field}");
         }
-        for bad in ["../outside", "C:/bootmgr", "AUX", "folder//file",
-                    "EFI/BOOT/.", "foo/bar ", "COM9.txt", "\\root", ""] {
+        for bad in [
+            "../outside",
+            "C:/bootmgr",
+            "AUX",
+            "folder//file",
+            "EFI/BOOT/.",
+            "foo/bar ",
+            "COM9.txt",
+            "\\root",
+            "",
+        ] {
             let mut v = base();
             v["RequiredFiles"] = json!([bad]);
             assert!(policy(&v).is_err(), "media path {bad}");
