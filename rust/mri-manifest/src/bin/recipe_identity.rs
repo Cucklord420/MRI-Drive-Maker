@@ -100,6 +100,71 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
+    fn powershell_oracle(fixture: &Value) -> String {
+        use std::io::Write;
+        use std::path::PathBuf;
+        use std::process::{Command, Stdio};
+
+        // Compare directly with the original exported Get-MRIRecipe, without
+        // enumerating disks, invoking setup, or touching customer files.
+        let module = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../MRI.Batch.psm1");
+        let escaped_path = module.to_string_lossy().replace('\'', "''");
+        let script = format!(
+            "$ErrorActionPreference = 'Stop'; Import-Module '{escaped_path}' -Force -DisableNameChecking; \
+             $fixture = [Console]::In.ReadToEnd() | ConvertFrom-Json; \
+             Get-MRIRecipe -Config $fixture.Config -SourceManifest $fixture.SourceManifest"
+        );
+        let mut child = Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("original Windows PowerShell reference is required");
+        child
+            .stdin
+            .take()
+            .expect("PowerShell stdin")
+            .write_all(fixture.to_string().as_bytes())
+            .expect("write synthetic fixture");
+        let output = child.wait_with_output().expect("PowerShell reference completes");
+        assert!(
+            output.status.success(),
+            "PowerShell original failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout)
+            .expect("PowerShell reference result must be UTF-8")
+            .trim()
+            .to_owned()
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn one_hundred_recipes_match_original_powershell() {
+        for case in 0..100 {
+            let mut input = fixture();
+            input["SourceManifest"]["Digest"] = json!(format!("SYNTHETIC-{case:03}"));
+            match case % 10 {
+                0 => {}
+                1 => input["Config"]["PrepareDisk"] = json!(false),
+                2 => input["Config"]["SetupBatch"] = json!("prepare.cmd"),
+                3 => input["Config"]["SetupArguments"] = json!(["/quiet", "/norestart"]),
+                4 => input["Config"]["SetupInteractive"] = json!(true),
+                5 => input["Config"]["RequiredFiles"] = json!(["bootmgr", "EFI\\BOOT\\BOOTX64.EFI"]),
+                6 => input["Config"]["MutableFiles"] = json!(["BCD"]),
+                7 => input["Config"]["MaxParallel"] = json!(1),
+                8 => input["Config"]["RequiredFiles"] = json!(["café.txt"]),
+                9 => input["Config"]["SetupArguments"] = json!(["embedded \"quote\"", "a&b"]),
+                _ => unreachable!(),
+            }
+            let expected = powershell_oracle(&input);
+            let actual = policy(&input).unwrap();
+            assert_eq!(actual.as_str(), Some(expected.as_str()), "recipe parity case {case}");
+        }
+    }
+
     #[test]
     fn missing_required_fields_fail() {
         assert!(policy(&json!({"Config":{},"SourceManifest":{}})).is_err());
