@@ -5,6 +5,7 @@ on:
       - 'rust/mri-manifest/**'
       - 'MRI.Batch.psm1'
       - 'tests/RustManifestParity.ps1'
+      - 'tests/RustManifestMatchParity.ps1'
       - '.github/workflows/rust-manifest.yml'
   pull_request:
   workflow_dispatch:
@@ -32,3 +33,6 @@ jobs:
       - name: Compare 400 synthetic manifests with real Get-MRIManifest
         shell: powershell
         run: ./tests/RustManifestParity.ps1
+      - name: Compare 600 final-manifest match decisions with real Assert-MRIManifestMatch
+        shell: powershell
+        run: ./tests/RustManifestMatchParity.ps1
