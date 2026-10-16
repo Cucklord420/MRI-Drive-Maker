@@ -170,31 +170,42 @@ pub fn compute(root: &Path, ignore_system: bool, no_hash: bool) -> Result<Manife
 }
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.first().is_some_and(|s|s=="--compare-json-file") {
-        if args.len()!=2 {
+    if args.first().is_some_and(|s| s == "--compare-json-file") {
+        if args.len() != 2 {
             eprintln!("Usage: mri-manifest --compare-json-file INPUT.json");
             std::process::exit(2);
         }
-        let document=std::fs::read(&args[1]).unwrap_or_else(|e|{
-            eprintln!("Cannot read comparison fixture: {e}");std::process::exit(2)
+        let document = std::fs::read(&args[1]).unwrap_or_else(|e| {
+            eprintln!("Cannot read comparison fixture: {e}");
+            std::process::exit(2)
         });
-        let value:Value=serde_json::from_slice(&document).unwrap_or_else(|e|{
-            eprintln!("Invalid comparison JSON: {e}");std::process::exit(2)
+        let value: Value = serde_json::from_slice(&document).unwrap_or_else(|e| {
+            eprintln!("Invalid comparison JSON: {e}");
+            std::process::exit(2)
         });
-        let result=(||{
-            let expected=value["Expected"]["Entries"].as_array().ok_or("Missing Expected.Entries")?;
-            let actual=value["Actual"]["Entries"].as_array().ok_or("Missing Actual.Entries")?;
-            let mutable=value["MutableFiles"].as_array().ok_or("Missing MutableFiles")?
-                .iter().map(|v|v.as_str().ok_or("Bad MutableFiles item")
-                    .map(str::to_owned)).collect::<Result<Vec<_>,_>>()?;
-            let exact=value["Exact"].as_bool().ok_or("Missing Exact flag")?;
-            let layout=value["LayoutOnly"].as_bool().ok_or("Missing LayoutOnly flag")?;
-            compare::compare(expected,actual,&mutable,exact,layout)
+        let result = (|| {
+            let expected = value["Expected"]["Entries"]
+                .as_array()
+                .ok_or("Missing Expected.Entries")?;
+            let actual = value["Actual"]["Entries"]
+                .as_array()
+                .ok_or("Missing Actual.Entries")?;
+            let mutable = value["MutableFiles"]
+                .as_array()
+                .ok_or("Missing MutableFiles")?
+                .iter()
+                .map(|v| v.as_str().ok_or("Bad MutableFiles item").map(str::to_owned))
+                .collect::<Result<Vec<_>, _>>()?;
+            let exact = value["Exact"].as_bool().ok_or("Missing Exact flag")?;
+            let layout = value["LayoutOnly"]
+                .as_bool()
+                .ok_or("Missing LayoutOnly flag")?;
+            compare::compare(expected, actual, &mutable, exact, layout)
         })();
         match result {
-            Ok(())=>println!("{}",serde_json::json!({"Ok":true,"Error":null})),
-            Err(error)=>{
-                println!("{}",serde_json::json!({"Ok":false,"Error":error}));
+            Ok(()) => println!("{}", serde_json::json!({"Ok":true,"Error":null})),
+            Err(error) => {
+                println!("{}", serde_json::json!({"Ok":false,"Error":error}));
                 std::process::exit(1)
             }
         }
