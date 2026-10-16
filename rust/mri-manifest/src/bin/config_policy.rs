@@ -228,7 +228,7 @@ mod tests {
         }
         for bad in ["..\\escape.cmd", "C:\\Setup.cmd", "\\network.cmd",
                     "CON.cmd", "LPT¹.bat", "foo\\.\\bar.cmd", "setup.exe",
-                    "setup&delete.cmd", "foo//setup.cmd", "foo\\bad .cmd"] {
+                    "setup&delete.cmd", "foo//setup.cmd", "foo \\setup.cmd"] {
             let mut v = base();
             v["SetupBatch"] = json!(bad);
             assert!(policy(&v).is_err(), "setup path {bad}");
