@@ -127,7 +127,8 @@ fn normalize_zip_creator_version(path:&Path)->Result<(),String>{
             || bytes.get(cursor..cursor+4)!=Some(&b"PK\x01\x02"[..]) {
             return Err("Invalid ZIP central-directory header".into());
         }
-        if ![10u8,46u8].contains(&bytes[cursor+4]) || bytes[cursor+5]!=3 {
+        if ![10u8,46u8].contains(&bytes[cursor+4])
+            || ![0u8,3u8].contains(&bytes[cursor+5]) {
             return Err(format!("Unexpected native ZIP creator platform/version: {}/{}", bytes[cursor+4], bytes[cursor+5]));
         }
         // ZIP 9 marks even STORED files as version 10 (ZIP 1.0),
@@ -148,6 +149,7 @@ fn normalize_zip_creator_version(path:&Path)->Result<(),String>{
         bytes[local+4]=20;
         bytes[cursor+6]=20;
         bytes[cursor+4]=20; // Python zipfile: version made by 20
+        bytes[cursor+5]=3; // Python ZipInfo sets Unix creator, including on Windows
         let filename_len=u16::from_le_bytes([bytes[cursor+28],bytes[cursor+29]]) as usize;
         let extra_len=u16::from_le_bytes([bytes[cursor+30],bytes[cursor+31]]) as usize;
         let comment_len=u16::from_le_bytes([bytes[cursor+32],bytes[cursor+33]]) as usize;
