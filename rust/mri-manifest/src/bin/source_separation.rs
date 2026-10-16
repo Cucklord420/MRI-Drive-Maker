@@ -19,11 +19,11 @@ fn policy(input: &Value) -> Result<Value, String> {
     };
     let source = normalized(source)?;
     let app = normalized(app)?;
-    let owned = if let Some(cache) = cache {
-        source.starts_with(&normalized(cache)?)
-    } else {
-        false
-    };
+    // The original PowerShell GetFullPath does not require the cache path to
+    // exist. Missing/unreadable cache cannot authorize an ownership exemption.
+    let owned = cache
+        .and_then(|directory| normalized(directory).ok())
+        .is_some_and(|directory| source.starts_with(&directory));
     if app.starts_with(&source) || (source.starts_with(&app) && !owned) {
         return Err(
             "Keep the official MRI source folder separate from the automation folder.".into(),
@@ -65,6 +65,13 @@ mod tests {
         std::fs::create_dir_all(app.join("cache").join("extract")).unwrap();
         std::fs::create_dir(&source).unwrap();
         assert!(policy(&json!({"SourcePath":source,"ApplicationPath":app})).is_ok());
+        let missing_cache = tmp.path().join("missing-cache");
+        // Missing cache metadata cannot cause a valid, separate source to fail.
+        assert!(policy(&json!({"SourcePath":source,
+            "ApplicationPath":app,"CacheDirectory":missing_cache})).is_ok());
+        // A missing cache also cannot authorize a nested automation source.
+        assert!(policy(&json!({"SourcePath":app.join("cache").join("extract"),
+            "ApplicationPath":app,"CacheDirectory":missing_cache})).is_err());
         assert!(policy(&json!({"SourcePath":app,"ApplicationPath":app.join("cache")})).is_err());
         assert!(
             policy(&json!({"SourcePath":app.join("cache").join("extract"),
