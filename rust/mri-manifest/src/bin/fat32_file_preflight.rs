@@ -52,7 +52,7 @@ mod tests {
     use super::*;
     #[test]
     fn boundary_sizes_and_required_paths() {
-        let base=json!({"Entries":[{"RelativePath":"bootmgr","IsDirectory":false,"Length":4294967295}],
+        let base=json!({"Entries":[{"RelativePath":"bootmgr","IsDirectory":false,"Length":4294967295_u64}],
             "RequiredFiles":["BOOTMGR"]});
         assert!(policy(&base).is_ok());
         let mut over=base.clone();
