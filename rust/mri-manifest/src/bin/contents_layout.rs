@@ -39,9 +39,18 @@ fn policy(input: &Value) -> Result<Value, String> {
         // repeats stay rejected because the full manifest verifier checks
         // every original entry, not just the hashtable's last value.
         if let Some(previous) = expected.insert(path.to_lowercase(), entry) {
+            // The PowerShell verifier compares SHA-256 hex case-insensitively.
+            let hashes_match = match (
+                previous["Sha256"].as_str(),
+                entry["Sha256"].as_str(),
+            ) {
+                (Some(before), Some(after)) => before.eq_ignore_ascii_case(after),
+                (None, None) => true,
+                _ => false,
+            };
             if previous["IsDirectory"] != entry["IsDirectory"]
                 || previous["Length"] != entry["Length"]
-                || previous["Sha256"] != entry["Sha256"]
+                || !hashes_match
             {
                 return Err(MISSING_OR_EXTRA.into());
             }
@@ -147,6 +156,16 @@ mod tests {
             vec![boot.clone()],
             vec![boot.clone(), entry("efi\\boot\\bootx64.efi", 300)],
         );
+        assert_eq!(policy(&fixture).unwrap(), true);
+    }
+
+    #[test]
+    fn duplicate_receipt_hashes_are_case_insensitive_like_powershell() {
+        let mut first = entry("EFI\\BOOT\\BOOTX64.EFI", 300);
+        first["Sha256"] = json!("A".repeat(64));
+        let mut second = entry("efi\\boot\\bootx64.efi", 300);
+        second["Sha256"] = json!("a".repeat(64));
+        let fixture = input(vec![first.clone()], vec![first, second]);
         assert_eq!(policy(&fixture).unwrap(), true);
     }
 
