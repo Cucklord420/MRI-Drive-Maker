@@ -11,6 +11,15 @@ fn policy(input: &Value) -> Result<Value, String> {
         return Err("Missing valid target drive letter".into());
     }
     let folder = setup.replace('/', "\\");
+    // Assert-MRIConfig validates this before the original PowerShell caller
+    // reaches Get-MRISetupArguments. Enforce it again at this standalone
+    // native CLI boundary to prevent CMD operator injection via batch path.
+    let lower = folder.to_ascii_lowercase();
+    if !(lower.ends_with(".bat") || lower.ends_with(".cmd"))
+        || folder.chars().any(|ch| matches!(ch, '%' | '!' | '&' | '^' | '(' | ')'))
+    {
+        return Err("Choose a .bat/.cmd path without CMD metacharacters.".into());
+    }
     if folder.trim().is_empty() || folder.starts_with('\\') || folder.contains(':')
         || folder.chars().any(|c| c.is_control() || "*?\"<>|".contains(c)) {
         return Err(format!("A relative file path is required: {setup}"));
@@ -23,7 +32,7 @@ fn policy(input: &Value) -> Result<Value, String> {
         let name = part.split('.').next().unwrap_or("").to_uppercase();
         let reserved = matches!(name.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CLOCK$")
             || ["COM", "LPT"].iter().any(|prefix| {
-                name.strip_prefix(prefix).is_some_and(|suffix| {
+                name.strip_prefix(*prefix).is_some_and(|suffix| {
                     matches!(suffix, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³")
                 })
             });
@@ -106,6 +115,15 @@ mod tests {
             .is_err());
         }
     }
+    #[test]
+    fn rejects_cmd_metacharacters_in_batch_paths_before_quoting() {
+        for setup in ["setup&whoami.cmd", "setup%PATH%.cmd", "setup!.bat", "setup^.cmd",
+                      "setup(unsafe).cmd", "tools/run.exe"] {
+            assert!(policy(&json!({"Letter":"E","Number":7,"Label":"MRI_01",
+                "SetupBatch":setup,"SetupArguments":[]})).is_err(), "{setup}");
+        }
+    }
+
     #[test]
     fn rejects_original_unsafe_windows_setup_components() {
         for setup in [
