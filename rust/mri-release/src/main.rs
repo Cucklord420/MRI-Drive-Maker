@@ -49,7 +49,7 @@ fn verify(repo: &Path, archive_path: &Path) -> Result<Manifest, String> {
     let mut files = HashMap::new();
     for index in 0..zip.len() {
         let mut member = zip.by_index(index).map_err(|e| e.to_string())?;
-        let name = member.name().to_owned();
+        let name = member.name().map_err(|e| e.to_string())?.into_owned();
         if !names.insert(name.clone()) {
             return Err("Duplicate package entries".into());
         }
