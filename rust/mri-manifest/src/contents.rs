@@ -29,12 +29,12 @@ fn receipt_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
 }
 
 fn assert_not_linked(root: &Path, path: &Path) -> Result<(), String> {
-    // Do not follow parent junctions/symlinks introduced after enumeration.
+    // Reject Windows reparse points and symbolic links on all receipt paths.
     let relative = path.strip_prefix(root).map_err(|e| e.to_string())?;
     let mut cursor = root.to_path_buf();
     for component in relative.components() {
         cursor.push(component.as_os_str());
-        if fs::symlink_metadata(&cursor).is_ok_and(|m| m.file_type().is_symlink()) {
+        if fs::symlink_metadata(&cursor).is_ok_and(|m| crate::has_link_or_reparse(&m)) {
             return Err("A target file became a link.".into());
         }
     }
