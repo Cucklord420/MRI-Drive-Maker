@@ -2,7 +2,6 @@
 //! Read-only Rust policy port; the existing PowerShell production code stays intact.
 use serde_json::{json, Value};
 
-
 fn policy(input: &Value) -> Result<Value, String> {
     let letter = input["Letter"].as_str().ok_or("Missing target letter")?;
     let number = input["Number"].as_i64().ok_or("Missing disk number")?;
