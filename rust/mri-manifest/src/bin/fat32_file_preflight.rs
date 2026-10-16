@@ -3,8 +3,13 @@
 use serde_json::{json, Value};
 
 fn policy(input: &Value) -> Result<Value, String> {
-    let files = input.get("Entries").and_then(Value::as_array).ok_or("Missing Entries")?;
-    let required = input.get("RequiredFiles").and_then(Value::as_array)
+    let files = input
+        .get("Entries")
+        .and_then(Value::as_array)
+        .ok_or("Missing Entries")?;
+    let required = input
+        .get("RequiredFiles")
+        .and_then(Value::as_array)
         .ok_or("Missing required files list")?;
     let mut count = 0usize;
     for entry in files {
@@ -16,15 +21,23 @@ fn policy(input: &Value) -> Result<Value, String> {
     if count == 0 {
         return Err("The source contains no files. Preparation was not started.".into());
     }
-    let run_setup = input.get("SetupBatch").and_then(Value::as_str)
+    let run_setup = input
+        .get("SetupBatch")
+        .and_then(Value::as_str)
         .is_some_and(|batch| !batch.trim().is_empty());
     if !run_setup {
         for name in required {
             let wanted = name.as_str().ok_or("Required file name is invalid")?;
-            if !files.iter().any(|file| file["IsDirectory"] == false
-                && file["RelativePath"].as_str().is_some_and(|path| path.eq_ignore_ascii_case(wanted))
-                && file["Length"].as_u64().is_some_and(|length| length > 0)) {
-                return Err(format!("Required boot file is missing from the source: {wanted}"));
+            if !files.iter().any(|file| {
+                file["IsDirectory"] == false
+                    && file["RelativePath"]
+                        .as_str()
+                        .is_some_and(|path| path.eq_ignore_ascii_case(wanted))
+                    && file["Length"].as_u64().is_some_and(|length| length > 0)
+            }) {
+                return Err(format!(
+                    "Required boot file is missing from the source: {wanted}"
+                ));
             }
         }
     }
@@ -73,13 +86,20 @@ mod tests {
         assert!(policy(&base).is_ok());
         let mut over = base.clone();
         over["Entries"][0]["Length"] = json!(4294967296_u64);
-        assert_eq!(policy(&over).unwrap_err(), "A source file is larger than FAT32 permits.");
+        assert_eq!(
+            policy(&over).unwrap_err(),
+            "A source file is larger than FAT32 permits."
+        );
         let mut missing = base.clone();
         missing["RequiredFiles"] = json!(["EFI/BOOT/BOOTX64.EFI"]);
-        assert_eq!(policy(&missing).unwrap_err(),
-            "Required boot file is missing from the source: EFI/BOOT/BOOTX64.EFI");
-        assert_eq!(policy(&json!({"Entries":[],"RequiredFiles":[]})).unwrap_err(),
-            "The source contains no files. Preparation was not started.");
+        assert_eq!(
+            policy(&missing).unwrap_err(),
+            "Required boot file is missing from the source: EFI/BOOT/BOOTX64.EFI"
+        );
+        assert_eq!(
+            policy(&json!({"Entries":[],"RequiredFiles":[]})).unwrap_err(),
+            "The source contains no files. Preparation was not started."
+        );
     }
 
     #[test]
@@ -92,7 +112,9 @@ mod tests {
         assert!(policy(&direct).is_err());
         let mut oversized = setup;
         oversized["Entries"][0]["Length"] = json!(4294967296_u64);
-        assert_eq!(policy(&oversized).unwrap_err(),
-            "A source file is larger than FAT32 permits.");
+        assert_eq!(
+            policy(&oversized).unwrap_err(),
+            "A source file is larger than FAT32 permits."
+        );
     }
 }
