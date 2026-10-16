@@ -13,8 +13,10 @@ fn policy(input: &Value) -> Result<Value, String> {
         .ok_or("Missing required files list")?;
     let mut count = 0usize;
     for entry in files {
-        if entry["IsDirectory"] != true {
-            count += 1;
+        match entry.get("IsDirectory").and_then(Value::as_bool) {
+            Some(false) => count += 1,
+            Some(true) => {}
+            None => return Err("Invalid IsDirectory flag".into()),
         }
     }
     // Match Invoke-MRIBuild, not a fictitious unconditional boot-file gate.
@@ -98,6 +100,27 @@ mod tests {
         );
         assert_eq!(
             policy(&json!({"Entries":[],"RequiredFiles":[]})).unwrap_err(),
+            "The source contains no files. Preparation was not started."
+        );
+    }
+
+    #[test]
+    fn malformed_directory_flags_cannot_be_counted_as_source_files() {
+        for value in [json!("false"), json!(null), json!(1), json!({})] {
+            let input = json!({
+                "Entries": [{"RelativePath": "bootmgr", "IsDirectory": value, "Length": 10}],
+                "RequiredFiles": [],
+                "SetupBatch": "setup.cmd"
+            });
+            assert_eq!(policy(&input).unwrap_err(), "Invalid IsDirectory flag");
+        }
+        let directories_only = json!({
+            "Entries": [{"RelativePath": "EFI", "IsDirectory": true, "Length": 0}],
+            "RequiredFiles": [],
+            "SetupBatch": "setup.cmd"
+        });
+        assert_eq!(
+            policy(&directories_only).unwrap_err(),
             "The source contains no files. Preparation was not started."
         );
     }
