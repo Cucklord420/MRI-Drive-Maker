@@ -1,14 +1,34 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Read-only Rust policy port; the existing PowerShell production code stays intact.
 use serde_json::{json, Value};
-use std::path::Path;
-#[cfg(windows)]
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
+
+// Match .NET GetFullPath's lexical dot-segment handling before checking every
+// path component. In particular, a nonexistent component before `..` must not
+// be probed after it has been removed from the absolute path.
+fn absolute_normalized(path: &Path) -> Result<PathBuf, String> {
+    let absolute = std::path::absolute(path).map_err(|e| e.to_string())?;
+    let mut normalized = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if normalized.file_name().is_some() {
+                    normalized.pop();
+                }
+            }
+            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
+                normalized.push(component.as_os_str());
+            }
+        }
+    }
+    Ok(normalized)
+}
 
 // Match Assert-MRIPlainDirectory: reject links and Windows junctions in the
 // selected directory and every ancestor before probing or descending through it.
 fn assert_plain_directory(path: &Path) -> Result<(), String> {
-    let absolute = std::path::absolute(path).map_err(|e| e.to_string())?;
+    let absolute = absolute_normalized(path)?;
     for parent in absolute.ancestors() {
         let metadata = std::fs::symlink_metadata(parent).map_err(|e| e.to_string())?;
         if metadata.file_type().is_symlink() {
@@ -54,12 +74,13 @@ fn strip_extended_path_prefix(path: PathBuf) -> PathBuf {
 
 fn policy(input: &Value) -> Result<Value, String> {
     let value = input["Path"].as_str().ok_or("Missing media folder")?;
-    assert_plain_directory(Path::new(value))?;
+    let absolute = absolute_normalized(Path::new(value))?;
+    assert_plain_directory(&absolute)?;
     // Preserve PowerShell's filesystem spelling for 8.3 paths while returning
     // ordinary DOS/UNC paths instead of canonicalize's extended-length prefix.
     #[cfg(windows)]
     let mut root = {
-        let canonical = std::fs::canonicalize(value).map_err(|e| e.to_string())?;
+        let canonical = std::fs::canonicalize(&absolute).map_err(|e| e.to_string())?;
         if value.starts_with(r"\\?\") {
             canonical
         } else {
@@ -67,7 +88,7 @@ fn policy(input: &Value) -> Result<Value, String> {
         }
     };
     #[cfg(not(windows))]
-    let mut root = std::path::absolute(value).map_err(|e| e.to_string())?;
+    let mut root = absolute;
     for _depth in 0..10 {
         assert_plain_directory(&root)?;
         if root.join("bootmgr").is_file()
@@ -134,11 +155,32 @@ mod tests {
         let nested = temp.path().join("wrapper").join("second");
         std::fs::create_dir_all(&nested).unwrap();
         std::fs::write(nested.join("bootmgr"), b"synthetic").unwrap();
+        #[cfg(windows)]
+        let expected = strip_extended_path_prefix(nested.canonicalize().unwrap());
+        #[cfg(not(windows))]
+        let expected = absolute_normalized(&nested).unwrap();
         assert_eq!(
             policy(&json!({"Path":temp.path()})).unwrap(),
-            json!(std::path::absolute(&nested).unwrap().to_string_lossy())
+            json!(expected.to_string_lossy())
         );
     }
+    #[test]
+    fn normalizes_missing_component_before_parent_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("dot-normalized");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("bootmgr"), b"synthetic").unwrap();
+        let input = temp
+            .path()
+            .join("does-not-exist")
+            .join("..")
+            .join("dot-normalized");
+        assert_eq!(
+            policy(&json!({"Path":input})).unwrap(),
+            json!(absolute_normalized(&root).unwrap().to_string_lossy())
+        );
+    }
+
     #[test]
     fn rejects_excessive_wrapper_depth() {
         let tmp = tempfile::tempdir().unwrap();
@@ -283,6 +325,7 @@ try {
         assert_original_parity(&dot_input, Some(&dot_root), &module);
 
         let mut depth_ok = base.join("depth nine");
+        std::fs::create_dir(&depth_ok).unwrap();
         for index in 0..9 {
             depth_ok.push(format!("wrapper-{index}"));
             std::fs::create_dir(&depth_ok).unwrap();
@@ -291,6 +334,7 @@ try {
         assert_original_parity(&base.join("depth nine"), Some(&depth_ok), &module);
 
         let mut too_deep = base.join("depth ten");
+        std::fs::create_dir(&too_deep).unwrap();
         for index in 0..10 {
             too_deep.push(format!("wrapper-{index}"));
             std::fs::create_dir(&too_deep).unwrap();
