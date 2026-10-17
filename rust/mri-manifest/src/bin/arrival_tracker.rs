@@ -4,15 +4,9 @@ use serde_json::{json, Value};
 use std::collections::HashSet;
 
 fn policy(input: &Value) -> Result<Value, String> {
-    let drives = input["Inventory"]
-        .as_array()
-        .ok_or("Missing Inventory")?;
-    let registry = input["Records"]
-        .as_array()
-        .ok_or("Missing Records")?;
-    let minimum = input["StablePolls"]
-        .as_i64()
-        .ok_or("Missing StablePolls")?;
+    let drives = input["Inventory"].as_array().ok_or("Missing Inventory")?;
+    let registry = input["Records"].as_array().ok_or("Missing Records")?;
+    let minimum = input["StablePolls"].as_i64().ok_or("Missing StablePolls")?;
     if minimum < 2 {
         return Err("StablePolls must be at least 2".into());
     }
@@ -55,9 +49,10 @@ fn policy(input: &Value) -> Result<Value, String> {
             .into_iter()
             .next()
             .unwrap_or_else(|| key.to_owned());
-        let mut state = tracker.get(&storage_key).cloned().unwrap_or_else(|| {
-            json!({"Number":number,"Stable":0,"Attempted":false})
-        });
+        let mut state = tracker
+            .get(&storage_key)
+            .cloned()
+            .unwrap_or_else(|| json!({"Number":number,"Stable":0,"Attempted":false}));
         // Treat tracker state as untrusted persisted input rather than
         // accepting silently coerced counts or attempted flags.
         if state["Number"].as_i64().is_none()
@@ -178,7 +173,10 @@ mod tests {
                 "DISK-X":{"Number":7,"Stable":1,"Attempted":false}
             }
         });
-        assert_eq!(policy(&input).unwrap_err(), "Ambiguous duplicate tracker identity");
+        assert_eq!(
+            policy(&input).unwrap_err(),
+            "Ambiguous duplicate tracker identity"
+        );
         input["Tracker"] = json!({});
         input["Inventory"][0]["Blocked"] = Value::Null;
         assert_eq!(
