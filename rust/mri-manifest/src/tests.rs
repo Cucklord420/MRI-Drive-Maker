@@ -106,15 +106,15 @@ fn windows_directory_junctions_are_rejected_by_manifest_and_receipt_checks() {
     // A real Windows junction is not a Unix symlink. Use an owned, disposable
     // directory and verify that the fixture has the reparse-point attribute.
     let junction = root.join("unexpected junction");
-    let command = format!(
-        "mklink /J \"{}\" \"{}\"",
-        junction.display(),
-        outside.display()
-    );
+    // Give cmd.exe the command and each path as distinct arguments. A single
+    // prequoted /C command string is parsed differently by cmd.exe on Windows.
     let output = Command::new("cmd")
         .arg("/D")
         .arg("/C")
-        .arg(command)
+        .arg("mklink")
+        .arg("/J")
+        .arg(&junction)
+        .arg(&outside)
         .output()
         .expect("Windows command processor must be present");
     assert!(output.status.success(), "mklink /J failed: {output:?}");
