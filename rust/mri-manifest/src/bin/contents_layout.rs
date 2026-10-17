@@ -5,8 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 const MISSING_OR_EXTRA: &str =
     "Drive contains unexpected or missing content. It will not be erased or overwritten.";
-const UNEXPECTED: &str =
-    "Drive contains unexpected content. It will not be erased or overwritten.";
+const UNEXPECTED: &str = "Drive contains unexpected content. It will not be erased or overwritten.";
 
 fn policy(input: &Value) -> Result<Value, String> {
     let current = input["CurrentEntries"]
@@ -40,10 +39,7 @@ fn policy(input: &Value) -> Result<Value, String> {
         // every original entry, not just the hashtable's last value.
         if let Some(previous) = expected.insert(path.to_lowercase(), entry) {
             // The PowerShell verifier compares SHA-256 hex case-insensitively.
-            let hashes_match = match (
-                previous["Sha256"].as_str(),
-                entry["Sha256"].as_str(),
-            ) {
+            let hashes_match = match (previous["Sha256"].as_str(), entry["Sha256"].as_str()) {
                 (Some(before), Some(after)) => before.eq_ignore_ascii_case(after),
                 (None, None) => true,
                 _ => false,
