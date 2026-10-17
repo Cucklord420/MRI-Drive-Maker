@@ -175,9 +175,13 @@ mod tests {
             .join("does-not-exist")
             .join("..")
             .join("dot-normalized");
+        #[cfg(windows)]
+        let expected = strip_extended_path_prefix(root.canonicalize().unwrap());
+        #[cfg(not(windows))]
+        let expected = absolute_normalized(&root).unwrap();
         assert_eq!(
             policy(&json!({"Path":input})).unwrap(),
-            json!(absolute_normalized(&root).unwrap().to_string_lossy())
+            json!(expected.to_string_lossy())
         );
     }
 
