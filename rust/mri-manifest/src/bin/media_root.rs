@@ -2,6 +2,8 @@
 //! Read-only Rust policy port; the existing PowerShell production code stays intact.
 use serde_json::{json, Value};
 use std::path::Path;
+#[cfg(windows)]
+use std::path::PathBuf;
 
 // Match Assert-MRIPlainDirectory: reject links and Windows junctions in the
 // selected directory and every ancestor before probing or descending through it.
@@ -35,12 +37,36 @@ fn assert_plain_directory(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(windows)]
+fn strip_extended_path_prefix(path: PathBuf) -> PathBuf {
+    let path_text = path.to_string_lossy();
+    if let Some(unc) = path_text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{unc}"));
+    }
+    if let Some(drive_path) = path_text.strip_prefix(r"\\?\") {
+        let bytes = drive_path.as_bytes();
+        if bytes.first().is_some_and(u8::is_ascii_alphabetic) && bytes.get(1..3) == Some(b":\\") {
+            return PathBuf::from(drive_path);
+        }
+    }
+    path
+}
+
 fn policy(input: &Value) -> Result<Value, String> {
     let value = input["Path"].as_str().ok_or("Missing media folder")?;
     assert_plain_directory(Path::new(value))?;
-    // The original Get-MRIMediaRoot starts with [IO.Path]::GetFullPath.
-    // On Windows, std::path::absolute uses the same GetFullPathNameW behavior
-    // without canonicalize's extended-length \\?\ prefix.
+    // Preserve PowerShell's filesystem spelling for 8.3 paths while returning
+    // ordinary DOS/UNC paths instead of canonicalize's extended-length prefix.
+    #[cfg(windows)]
+    let mut root = {
+        let canonical = std::fs::canonicalize(value).map_err(|e| e.to_string())?;
+        if value.starts_with(r"\\?\") {
+            canonical
+        } else {
+            strip_extended_path_prefix(canonical)
+        }
+    };
+    #[cfg(not(windows))]
     let mut root = std::path::absolute(value).map_err(|e| e.to_string())?;
     for _depth in 0..10 {
         assert_plain_directory(&root)?;
@@ -201,12 +227,12 @@ try {
             String::from_utf8_lossy(&output.stderr)
         );
         if let Some(expected) = expected {
-            let expected = expected.to_string_lossy();
+            let expected_path = expected.canonicalize().unwrap();
             let rust = rust.unwrap();
             let rust = rust.as_str().unwrap();
             let powershell = String::from_utf8(output.stdout).unwrap();
-            assert_eq!(rust, expected);
-            assert_eq!(powershell, expected);
+            assert_eq!(rust, powershell);
+            assert_eq!(Path::new(rust).canonicalize().unwrap(), expected_path);
         }
     }
 
