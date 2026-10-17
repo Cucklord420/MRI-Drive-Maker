@@ -164,7 +164,7 @@ mod tests {
         let script = r#"
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding -ArgumentList $false
-Import-Module -LiteralPath $env:MRI_BATCH_MODULE -Force -DisableNameChecking | Out-Null
+Import-Module -Name $env:MRI_BATCH_MODULE -Force -DisableNameChecking | Out-Null
 try {
     $mediaRoot = Get-MRIMediaRoot -Path $env:MRI_MEDIA_ROOT
     [Console]::Out.Write($mediaRoot)
