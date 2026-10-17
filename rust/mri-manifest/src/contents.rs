@@ -165,7 +165,7 @@ mod tests {
             b"data",
         )
         .unwrap();
-        assert_eq!(verify(root, None).unwrap(), false);
+        assert!(!verify(root, None).unwrap());
         fs::write(root.join("bootmgr"), b"known").unwrap();
         let receipt = json!({"TargetManifest": compute(root, true, false).unwrap()});
         assert!(verify(root, Some(&receipt)).unwrap());
