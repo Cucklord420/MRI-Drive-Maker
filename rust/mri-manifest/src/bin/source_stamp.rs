@@ -25,7 +25,9 @@ fn dotnet_ticks(time: SystemTime) -> i128 {
 fn field<'a>(value: &'a Value, name: &str) -> Result<Option<&'a Value>, String> {
     let object = value.as_object().ok_or("Expected a JSON object")?;
     // PowerShell PSCustomObject property lookup is case-insensitive.
-    let mut matches = object.iter().filter(|(key, _)| key.eq_ignore_ascii_case(name));
+    let mut matches = object
+        .iter()
+        .filter(|(key, _)| key.eq_ignore_ascii_case(name));
     let result = matches.next().map(|(_, value)| value);
     if matches.next().is_some() {
         return Err(format!("Duplicate case-insensitive {name} property"));
@@ -113,7 +115,8 @@ mod tests {
         let folded = json!({"inputstamp": {"PATH":path.to_string_lossy(),
             "length":meta.len(),"writeticks":ticks as i64}});
         assert!(policy(&folded).is_ok());
-        let ambiguous = json!({"InputStamp": fixture["InputStamp"], "inputstamp": fixture["InputStamp"]});
+        let ambiguous =
+            json!({"InputStamp": fixture["InputStamp"], "inputstamp": fixture["InputStamp"]});
         assert!(policy(&ambiguous).is_err());
         std::fs::write(&path, b"changed size").unwrap();
         assert!(policy(&fixture).is_err());
