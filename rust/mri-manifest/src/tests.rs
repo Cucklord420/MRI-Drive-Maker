@@ -88,3 +88,53 @@ fn refuses_missing_source_and_linked_inputs() {
         assert!(compute(&link, false, false).is_err());
     }
 }
+
+#[cfg(windows)]
+#[test]
+fn windows_directory_junctions_are_rejected_by_manifest_and_receipt_checks() {
+    use std::os::windows::fs::MetadataExt;
+    use std::process::Command;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("media with spaces");
+    let outside = tmp.path().join("outside with spaces");
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(&outside).unwrap();
+    let outside_file = outside.join("private fixture.bin");
+    fs::write(&outside_file, b"unrelated bytes").unwrap();
+
+    // A real Windows junction is not a Unix symlink. Use an owned, disposable
+    // directory and verify that the fixture has the reparse-point attribute.
+    let junction = root.join("unexpected junction");
+    // Give cmd.exe the command and each path as distinct arguments. A single
+    // prequoted /C command string is parsed differently by cmd.exe on Windows.
+    let output = Command::new("cmd")
+        .arg("/D")
+        .arg("/C")
+        .arg("mklink")
+        .arg("/J")
+        .arg(&junction)
+        .arg(&outside)
+        .output()
+        .expect("Windows command processor must be present");
+    assert!(output.status.success(), "mklink /J failed: {output:?}");
+    let attributes = fs::symlink_metadata(&junction).unwrap().file_attributes();
+    assert_ne!(
+        attributes & 0x0400,
+        0,
+        "test fixture is not a reparse point"
+    );
+
+    let nested_error = compute(&root, false, true).unwrap_err();
+    assert!(
+        nested_error.contains("Links are not allowed"),
+        "{nested_error}"
+    );
+    let root_error = compute(&junction, false, true).unwrap_err();
+    assert!(
+        root_error.contains("links or mounted-directory junctions"),
+        "{root_error}"
+    );
+    assert!(crate::contents::verify(&root, None).is_err());
+    assert_eq!(fs::read(&outside_file).unwrap(), b"unrelated bytes");
+}
