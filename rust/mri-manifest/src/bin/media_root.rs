@@ -187,8 +187,19 @@ try {
             .output()
             .expect("Windows PowerShell 5.1 must be available for the direct parity test");
 
-        assert_eq!(rust.is_ok(), expected.is_some());
-        assert_eq!(output.status.success(), expected.is_some());
+        assert_eq!(
+            rust.is_ok(),
+            expected.is_some(),
+            "Rust policy result for {input:?}: {rust:?}"
+        );
+        assert_eq!(
+            output.status.success(),
+            expected.is_some(),
+            "PowerShell result for {input:?}: status={:?}, stdout={:?}, stderr={:?}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
         if let Some(expected) = expected {
             let expected = expected.to_string_lossy();
             let rust = rust.unwrap();
