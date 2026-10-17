@@ -2,6 +2,7 @@
 //! Read-only source manifest calculation; never formats or writes a target disk.
 //! Ports PowerShell Get-MRIManifest and Get-MRIFileHash for supported files.
 mod compare;
+mod contents;
 use serde::Serialize;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -14,15 +15,15 @@ use walkdir::{DirEntry, WalkDir};
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
 pub struct Entry {
-    relative_path: String,
-    is_directory: bool,
-    length: i64,
-    sha256: String,
+    pub(crate) relative_path: String,
+    pub(crate) is_directory: bool,
+    pub(crate) length: i64,
+    pub(crate) sha256: String,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct Manifest {
-    entries: Vec<Entry>,
+    pub(crate) entries: Vec<Entry>,
     total_bytes: i64,
     digest: String,
 }
@@ -198,6 +199,32 @@ pub fn compute(root: &Path, ignore_system: bool, no_hash: bool) -> Result<Manife
 }
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|s| s == "--contents-safe") {
+        if args.len() != 3 {
+            eprintln!("Usage: mri-manifest --contents-safe ROOT RECEIPT.json|-");
+            std::process::exit(2);
+        }
+        let receipt: Option<Value> = if args[2] == "-" {
+            None
+        } else {
+            let document = std::fs::read(&args[2]).unwrap_or_else(|e| {
+                eprintln!("Cannot read local receipt: {e}");
+                std::process::exit(2)
+            });
+            Some(serde_json::from_slice(&document).unwrap_or_else(|e| {
+                eprintln!("Invalid receipt JSON: {e}");
+                std::process::exit(2)
+            }))
+        };
+        match contents::verify(Path::new(&args[1]), receipt.as_ref()) {
+            Ok(safe) => println!("{}", serde_json::json!({"Safe":safe,"Error":null})),
+            Err(error) => {
+                println!("{}", serde_json::json!({"Safe":false,"Error":error}));
+                std::process::exit(1)
+            }
+        }
+        return;
+    }
     if args.first().is_some_and(|s| s == "--compare-json-file") {
         if args.len() != 2 {
             eprintln!("Usage: mri-manifest --compare-json-file INPUT.json");
