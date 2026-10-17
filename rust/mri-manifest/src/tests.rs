@@ -119,7 +119,11 @@ fn windows_directory_junctions_are_rejected_by_manifest_and_receipt_checks() {
         .expect("Windows command processor must be present");
     assert!(output.status.success(), "mklink /J failed: {output:?}");
     let attributes = fs::symlink_metadata(&junction).unwrap().file_attributes();
-    assert_ne!(attributes & 0x0400, 0, "test fixture is not a reparse point");
+    assert_ne!(
+        attributes & 0x0400,
+        0,
+        "test fixture is not a reparse point"
+    );
 
     let nested_error = compute(&root, false, true).unwrap_err();
     assert!(
