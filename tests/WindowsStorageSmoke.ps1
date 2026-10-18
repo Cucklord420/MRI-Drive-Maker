@@ -21,7 +21,7 @@ function Test-Storage { param([string]$Name,[scriptblock]$Code)
 }
 try {
     Test-Storage 'Windows storage cmdlets expose the parameter sets used by the builder' {
-        foreach ($entry in @(@('Get-Volume','Partition'),@('New-Partition','InputObject'),@('Mount-DiskImage','StorageType'),@('Clear-Disk','InputObject'))) {
+        foreach ($entry in @(@('Get-Volume','Partition'),@('New-Partition','InputObject'),@('Set-Partition','NoDefaultDriveLetter'),@('Mount-DiskImage','StorageType'),@('Clear-Disk','InputObject'))) {
             Check ((Get-Command $entry[0]).Parameters.ContainsKey($entry[1])) "$($entry[0]) lacks $($entry[1])."
         }
     }
@@ -80,8 +80,12 @@ public static class MRIStorageSmokeIsoWriter {
     Check ($disks.Count -eq 1) 'VHD must resolve to exactly one disk.'
     $disk=$disks[0]
     Check (-not $disk.IsBoot -and -not $disk.IsSystem -and [string]$disk.BusType -eq 'File Backed Virtual') 'Only the owned file-backed test disk may be initialized.'
-    $initialized=Initialize-Disk -InputObject $disk -PartitionStyle MBR -PassThru -ErrorAction Stop
-    $part=New-Partition -InputObject $initialized -UseMaximumSize -IsActive -AssignDriveLetter -ErrorAction Stop
+    $initialized=Initialize-Disk -InputObject $disk -PartitionStyle GPT -PassThru -ErrorAction Stop
+    $part=New-Partition -InputObject $initialized -UseMaximumSize -ErrorAction Stop
+    # NoDefaultDriveLetter is honored only on GPT disks. Set it before formatting
+    # so the volume-GUID-only fixture never receives an automatically assigned letter.
+    Set-Partition -InputObject $part -NoDefaultDriveLetter $true -ErrorAction Stop
+    $part=Get-Partition -DiskNumber $disk.Number -PartitionNumber $part.PartitionNumber -ErrorAction Stop
     $part | Format-Volume -FileSystem FAT32 -NewFileSystemLabel 'MRI_TEST' -Confirm:$false -ErrorAction Stop | Out-Null
     $drive=[pscustomobject]@{Key=(Get-MRIDriveKey 'OWNED-VHD' $vhd 'TEST VHD' $disk.Size);Number=[int]$disk.Number
         Serial='OWNED-VHD';PnpId=$vhd;Model='TEST VHD';Size=[long]$disk.Size;IsBoot=$false;IsSystem=$false
@@ -102,10 +106,8 @@ public static class MRIStorageSmokeIsoWriter {
         Check ($resolved -contains [IO.Path]::GetFullPath($temp)) 'The archive cache/data root was not protected.'
         Check ($resolved -notcontains [IO.Path]::GetFullPath($opened.Path)) 'A derived optical mount path was mistaken for a writable physical source disk.'
     }
-    $driveLetterPath=[string]$part.DriveLetter+':'
-    Remove-PartitionAccessPath -DiskNumber $disk.Number -PartitionNumber $part.PartitionNumber -AccessPath $driveLetterPath -ErrorAction Stop
     $part=Get-Partition -DiskNumber $disk.Number -PartitionNumber $part.PartitionNumber -ErrorAction Stop
-    Check ([string]::IsNullOrWhiteSpace([string]$part.DriveLetter)) 'The owned fixture must have no drive letter for the volume-GUID-only test.'
+    Check ([string]::IsNullOrWhiteSpace([string]$part.DriveLetter)) "The owned fixture must have no drive letter for the volume-GUID-only test; current value is '$($part.DriveLetter)'."
     Test-Storage 'A real volume GUID source path protects its backing disk identity' {
         $protected=@(Get-MRIProtectedKeys @($target.Path) @($drive))
         Check ($protected.Count -eq 1 -and $protected[0] -eq $drive.Key) 'The volume GUID path did not protect its backing disk.'
