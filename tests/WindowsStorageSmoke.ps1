@@ -99,6 +99,12 @@ public static class MRIStorageSmokeIsoWriter {
     $runtime | Add-Member -NotePropertyName InputStamp -NotePropertyValue $opened.Stamp
     $manifest=Get-MRIManifest $opened.Path
     $state=Join-Path $temp 'state.json'; $receipt=Join-Path $temp 'receipt.json'; $work=Join-Path $temp 'Work'; $cancel=Join-Path $temp 'cancel'
+    $fixturePartitions=@(Get-Partition -DiskNumber $disk.Number -ErrorAction Stop)
+    if ($fixturePartitions.Count -ne 1) {
+        $diskSummary=Get-Disk -Number $disk.Number -ErrorAction Stop | Select-Object Number,PartitionStyle,OperationalStatus,Size | Format-List | Out-String
+        $partitionSummary=$fixturePartitions | Select-Object DiskNumber,PartitionNumber,Type,GptType,DriveLetter,Size,IsHidden,IsSystem,IsBoot,AccessPaths | Format-Table -AutoSize | Out-String
+        throw "Owned VHD fixture expected one partition on disk $($disk.Number), found $($fixturePartitions.Count). Disk: $diskSummary Partitions: $partitionSummary"
+    }
     $target=Get-MRITargetVolume $drive
     Test-Storage 'An archive source protects its original input and data tree without requiring an optical partition' {
         $resolved=@(Get-MRIResolvedProtectedPaths $runtime @($iso,$temp) $work $state $receipt)
