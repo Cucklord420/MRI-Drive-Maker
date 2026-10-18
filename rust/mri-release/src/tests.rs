@@ -86,7 +86,8 @@ fn inherited_git_context_cannot_redirect_synthetic_release_build_or_verification
             "GIT_WORK_TREE" => {
                 let raw_root = raw_git_success(&intended,
                     &["rev-parse", "--path-format=absolute", "--show-toplevel"], &environment);
-                assert_eq!(String::from_utf8(raw_root).unwrap().trim(), alternate.canonicalize().unwrap().display().to_string());
+                let raw_root = String::from_utf8(raw_root).unwrap();
+                assert_eq!(Path::new(raw_root.trim()).canonicalize().unwrap(), alternate.canonicalize().unwrap());
             }
             "GIT_COMMON_DIR" | "GIT_OBJECT_DIRECTORY" => {
                 assert!(!raw_git(&intended, &["show", "HEAD:SOURCE.txt"], &environment).status.success(),
