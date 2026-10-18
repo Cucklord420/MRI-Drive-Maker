@@ -114,7 +114,7 @@ public static class MRIStorageSmokeIsoWriter {
         $partitionSummary=$fixturePartitions | Select-Object DiskNumber,PartitionNumber,Type,GptType,DriveLetter,Size,IsHidden,IsSystem,IsBoot,AccessPaths | Format-Table -AutoSize | Out-String
         throw "Owned VHD fixture expected one partition on disk $($disk.Number), found $($fixturePartitions.Count). Disk: $diskSummary Partitions: $partitionSummary"
     }
-    $target=Get-MRITargetVolume $drive
+    $target=Get-MRITargetVolume $drive -RequireDriveLetter:$false
     Test-Storage 'An archive source protects its original input and data tree without requiring an optical partition' {
         $resolved=@(Get-MRIResolvedProtectedPaths $runtime @($iso,$temp) $work $state $receipt)
         Check ($resolved -contains [IO.Path]::GetFullPath($iso)) 'The original ISO file was not protected.'
