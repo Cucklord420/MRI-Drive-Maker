@@ -2,7 +2,7 @@
 
 ## PowerShell static analysis
 
-The Windows PowerShell 5.1 static-analysis workflow uses PSScriptAnalyzer **1.25.0**. The module manifest for this release requires PowerShell 5.1. The workflow downloads the official PowerShell Gallery package, checks its pinned SHA-512 digest, verifies the Authenticode signatures on the module manifest and script, and requires the reviewed Microsoft signing certificate before importing the module. It logs the verified version and digests, then keeps the existing `Error`-severity gate. It does not cache the package or use modules from the repository checkout.
+The Windows PowerShell 5.1 static-analysis workflow uses PSScriptAnalyzer **1.25.0**. The module manifest for this release requires PowerShell 5.1. The workflow downloads the official PowerShell Gallery package, checks its pinned SHA-512 digest, verifies the Authenticode signatures on the module manifest and script, and requires the reviewed Microsoft signing certificate before importing the module. It also checks that modified package bytes and an unexpected signer are rejected. It logs the verified version and digests, then keeps the existing `Error`-severity gate. It does not cache the package or use modules from the repository checkout.
 
 Reviewed upstream sources (2026-10-18):
 
