@@ -21,7 +21,7 @@ function Test-Storage { param([string]$Name,[scriptblock]$Code)
 }
 try {
     Test-Storage 'Windows storage cmdlets expose the parameter sets used by the builder' {
-        foreach ($entry in @(@('Get-Volume','Partition'),@('New-Partition','InputObject'),@('Set-Partition','NoDefaultDriveLetter'),@('Mount-DiskImage','StorageType'),@('Clear-Disk','InputObject'))) {
+        foreach ($entry in @(@('Get-Volume','Partition'),@('New-Partition','InputObject'),@('Remove-Partition','InputObject'),@('Set-Partition','NoDefaultDriveLetter'),@('Mount-DiskImage','StorageType'),@('Clear-Disk','InputObject'))) {
             Check ((Get-Command $entry[0]).Parameters.ContainsKey($entry[1])) "$($entry[0]) lacks $($entry[1])."
         }
     }
@@ -82,6 +82,15 @@ public static class MRIStorageSmokeIsoWriter {
     Check (-not $disk.IsBoot -and -not $disk.IsSystem -and [string]$disk.BusType -eq 'File Backed Virtual') 'Only the owned file-backed test disk may be initialized.'
     $initialized=Initialize-Disk -InputObject $disk -PartitionStyle GPT -PassThru -ErrorAction Stop
     $part=New-Partition -InputObject $initialized -UseMaximumSize -ErrorAction Stop
+    # New-Partition -UseMaximumSize creates an MSR plus a Basic partition on this
+    # GPT test disk. Copy mode requires one partition, so remove only the MSR from
+    # this previously verified, disposable file-backed VHD fixture.
+    $initialPartitions=@(Get-Partition -DiskNumber $disk.Number -ErrorAction Stop)
+    $reservedPartitions=@($initialPartitions | Where-Object { [string]$_.Type -eq 'Reserved' })
+    $basicPartitions=@($initialPartitions | Where-Object { [string]$_.Type -eq 'Basic' })
+    Check ($initialPartitions.Count -eq 2 -and $reservedPartitions.Count -eq 1 -and $basicPartitions.Count -eq 1) 'The owned GPT fixture must contain one MSR and one Basic partition before setup.'
+    Remove-Partition -InputObject $reservedPartitions[0] -Confirm:$false -ErrorAction Stop
+    $part=Get-Partition -DiskNumber $disk.Number -PartitionNumber $basicPartitions[0].PartitionNumber -ErrorAction Stop
     # NoDefaultDriveLetter is honored only on GPT disks. Set it before formatting
     # so the volume-GUID-only fixture never receives an automatically assigned letter.
     Set-Partition -InputObject $part -NoDefaultDriveLetter $true -ErrorAction Stop
@@ -100,7 +109,7 @@ public static class MRIStorageSmokeIsoWriter {
     $manifest=Get-MRIManifest $opened.Path
     $state=Join-Path $temp 'state.json'; $receipt=Join-Path $temp 'receipt.json'; $work=Join-Path $temp 'Work'; $cancel=Join-Path $temp 'cancel'
     $fixturePartitions=@(Get-Partition -DiskNumber $disk.Number -ErrorAction Stop)
-    if ($fixturePartitions.Count -ne 1) {
+    if ($fixturePartitions.Count -ne 1 -or [string]$fixturePartitions[0].Type -ne 'Basic') {
         $diskSummary=Get-Disk -Number $disk.Number -ErrorAction Stop | Select-Object Number,PartitionStyle,OperationalStatus,Size | Format-List | Out-String
         $partitionSummary=$fixturePartitions | Select-Object DiskNumber,PartitionNumber,Type,GptType,DriveLetter,Size,IsHidden,IsSystem,IsBoot,AccessPaths | Format-Table -AutoSize | Out-String
         throw "Owned VHD fixture expected one partition on disk $($disk.Number), found $($fixturePartitions.Count). Disk: $diskSummary Partitions: $partitionSummary"
