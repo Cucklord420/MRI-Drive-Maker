@@ -27,6 +27,7 @@ fn synthetic_repository(path: &Path, source: &str, launcher: &str,
     environment: &[(OsString, OsString)]) -> String {
     fs::create_dir_all(path).unwrap();
     raw_git_success(path, &["init", "-q"], environment);
+    raw_git_success(path, &["config", "core.autocrlf", "false"], environment);
     raw_git_success(path, &["config", "user.name", "MRI provenance test"], environment);
     raw_git_success(path, &["config", "user.email", "mri-provenance@example.invalid"], environment);
     fs::write(path.join("SOURCE.txt"), source).unwrap();

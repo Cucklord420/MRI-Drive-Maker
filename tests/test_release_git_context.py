@@ -35,6 +35,7 @@ def create_repo(path, source, launcher):
     path.mkdir(parents=True)
     env = clean_environment()
     run_git(path, ['init', '-q'], env)
+    run_git(path, ['config', 'core.autocrlf', 'false'], env)
     run_git(path, ['config', 'user.name', 'MRI provenance test'], env)
     run_git(path, ['config', 'user.email', 'mri-provenance@example.invalid'], env)
     (path / 'SOURCE.txt').write_text(source, encoding='utf-8')

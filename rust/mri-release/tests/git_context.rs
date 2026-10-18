@@ -37,6 +37,7 @@ fn git_success(repo: &Path, args: &[&str]) -> Vec<u8> {
 fn synthetic_alternate(path: &Path) -> String {
     fs::create_dir_all(path).unwrap();
     git_success(path, &["init", "-q"]);
+    git_success(path, &["config", "core.autocrlf", "false"]);
     git_success(
         path,
         &["config", "user.name", "MRI release adversarial fixture"],
