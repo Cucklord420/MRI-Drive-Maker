@@ -23,16 +23,60 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install PSScriptAnalyzer
+      - name: Verify PSScriptAnalyzer and analyze source
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          Install-Module PSScriptAnalyzer -Repository PSGallery -Scope CurrentUser -Force -ErrorAction Stop
+          $ProgressPreference = 'SilentlyContinue'
+          $version = '1.25.0'
+          $expectedPackageSha512 = 'E7FB573262E604BAB29914AE62921D24B97C2F88B519B41277B403EF6CE163F14B7D1B36DC73449A68E5AE5A8D9502891B10C264131FD1813ADF29BF131C1663'
+          $expectedSignerSha256 = 'B41C444F8CBD49D1B27CC2C76E0F3FB042BF9970B6B6F6B57FC8976514B03952'
+          $packagePath = Join-Path $env:RUNNER_TEMP "PSScriptAnalyzer.$version.zip"
+          $moduleRoot = Join-Path $env:RUNNER_TEMP "PSScriptAnalyzer.$version"
+          $manifestPath = Join-Path $moduleRoot 'PSScriptAnalyzer.psd1'
+          $scriptPath = Join-Path $moduleRoot 'PSScriptAnalyzer.psm1'
+          $expectedModuleVersion = [version]$version
 
-      - name: Check PowerShell scripts and modules
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          Invoke-WebRequest `
+            -Uri "https://www.powershellgallery.com/api/v2/package/PSScriptAnalyzer/$version" `
+            -OutFile $packagePath -UseBasicParsing -ErrorAction Stop
+
+          $packageSha512 = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA512).Hash
+          if ($packageSha512 -cne $expectedPackageSha512) {
+            throw 'PSScriptAnalyzer package SHA-512 did not match the reviewed artifact.'
+          }
+
+          Expand-Archive -LiteralPath $packagePath -DestinationPath $moduleRoot -ErrorAction Stop
+          foreach ($signedPath in @($manifestPath, $scriptPath)) {
+            $signature = Get-AuthenticodeSignature -FilePath $signedPath
+            if ($signature.Status -ne 'Valid' -or $null -eq $signature.SignerCertificate) {
+              throw "PSScriptAnalyzer Authenticode verification failed for $([IO.Path]::GetFileName($signedPath)): $($signature.Status)."
+            }
+
+            $sha256 = [System.Security.Cryptography.SHA256]::Create()
+            try {
+              $signerSha256 = [BitConverter]::ToString(
+                $sha256.ComputeHash($signature.SignerCertificate.RawData)
+              ).Replace('-', '')
+            }
+            finally {
+              $sha256.Dispose()
+            }
+
+            if ($signerSha256 -cne $expectedSignerSha256) {
+              throw "PSScriptAnalyzer signer certificate did not match the reviewed Microsoft certificate for $([IO.Path]::GetFileName($signedPath))."
+            }
+          }
+
+          Import-Module -Name $manifestPath -Force -ErrorAction Stop
+          $loadedModules = @(Get-Module -Name PSScriptAnalyzer)
+          if ($loadedModules.Count -ne 1 -or $loadedModules[0].Version -ne $expectedModuleVersion) {
+            throw "Loaded PSScriptAnalyzer version did not match $version."
+          }
+
+          Write-Output "Verified PSScriptAnalyzer $version; package SHA-512: $packageSha512"
+          Write-Output "Verified PSScriptAnalyzer Authenticode signer SHA-256: $expectedSignerSha256"
           $issues = @(Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error -ErrorAction Stop)
           if ($issues.Count -gt 0) {
             $issues | Format-Table -AutoSize | Out-String | Write-Output
