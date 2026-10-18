@@ -88,6 +88,14 @@ def _git_path(output, label):
     return Path(value).resolve(strict=True)
 
 
+def _same_filesystem_path(left, right):
+    """Compare existing paths by filesystem identity, including Windows aliases."""
+    try:
+        return os.path.samefile(left, right)
+    except OSError:
+        return False
+
+
 def _assert_git_identity(repo, environment):
     expected_root, expected_git_dir, expected_common_dir = _repository_layout(repo)
     actual_root = _git_path(_git_unchecked(
@@ -98,8 +106,9 @@ def _assert_git_identity(repo, environment):
     actual_common_dir = _git_path(_git_unchecked(
         expected_root, ['rev-parse', '--path-format=absolute', '--git-common-dir'], environment),
         'common Git directory')
-    if (actual_root != expected_root or actual_git_dir != expected_git_dir
-            or actual_common_dir != expected_common_dir):
+    if (not _same_filesystem_path(actual_root, expected_root)
+            or not _same_filesystem_path(actual_git_dir, expected_git_dir)
+            or not _same_filesystem_path(actual_common_dir, expected_common_dir)):
         raise RuntimeError('Git resolved a different worktree or repository than the intended source')
 
 

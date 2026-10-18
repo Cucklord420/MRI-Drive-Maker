@@ -137,6 +137,24 @@ class GitContextTests(unittest.TestCase):
         self.assertEqual(manifest['source_commit'], self.intended_commit)
         self.assertEqual(BUILDER.verify(archive, linked, environment), manifest)
 
+    def test_git_identity_accepts_equivalent_paths_reported_by_git(self):
+        expected_root, expected_git_dir, expected_common_dir = BUILDER._repository_layout(ROOT)
+        git_root = BUILDER._git_path(
+            run_git(ROOT, ['rev-parse', '--path-format=absolute', '--show-toplevel']),
+            'worktree root',
+        )
+        git_dir = BUILDER._git_path(
+            run_git(ROOT, ['rev-parse', '--absolute-git-dir']), 'Git directory',
+        )
+        common_dir = BUILDER._git_path(
+            run_git(ROOT, ['rev-parse', '--path-format=absolute', '--git-common-dir']),
+            'common Git directory',
+        )
+        self.assertTrue(BUILDER._same_filesystem_path(expected_root, git_root))
+        self.assertTrue(BUILDER._same_filesystem_path(expected_git_dir, git_dir))
+        self.assertTrue(BUILDER._same_filesystem_path(expected_common_dir, common_dir))
+        BUILDER._assert_git_identity(ROOT, clean_environment())
+
     def test_python_cli_build_and_verify_survive_combined_git_context_injection(self):
         archive = self.root / 'cli-release.zip'
         combined = {
