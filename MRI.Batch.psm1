@@ -406,7 +406,8 @@ function Assert-MRIPathReparseSafety {
             catch { throw 'Windows returned an invalid partition access path. No target is allowed to be written.' }
         }
     }
-    $root=[IO.Path]::GetPathRoot($Path)
+    $volumeRoot=[regex]::Match($Path,'^\\\\\?\\Volume\{[0-9A-Fa-f-]+\}\\')
+    $root=$(if ($volumeRoot.Success) { $volumeRoot.Value } else { [IO.Path]::GetPathRoot($Path) })
     if ([string]::IsNullOrWhiteSpace($root)) { throw 'Could not inspect a source or automation path. No target is allowed to be written.' }
     $current=$root
     $relative=$Path.Substring($root.Length)
@@ -446,9 +447,10 @@ function Resolve-MRIPathPartition {
     $longest=($matches | Measure-Object -Property PrefixLength -Maximum).Maximum
     $diskNumbers=@($matches | Where-Object { $_.PrefixLength -eq $longest } | ForEach-Object { $_.DiskNumber } | Sort-Object -Unique)
     if ($diskNumbers.Count -ne 1) { throw 'A source or automation path maps to multiple partitions. No target is allowed to be written.' }
-    $resolved=@($Partitions | Where-Object { $_.DiskNumber -eq $diskNumbers[0] })
-    if ($resolved.Count -ne 1) { throw 'A source or automation partition is ambiguous. No target is allowed to be written.' }
-    return $resolved[0]
+    # Several partitions on one disk may be returned for unrelated volumes.
+    # Path safety is enforced at the physical-disk level, so return the unique
+    # longest-prefix disk identity rather than requiring one partition per disk.
+    return [pscustomobject]@{DiskNumber=[int]$diskNumbers[0]}
 }
 function Get-MRIProtectedKeys {
     param([string[]]$Paths, [array]$Inventory)
