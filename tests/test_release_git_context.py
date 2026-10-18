@@ -38,7 +38,10 @@ def create_repo(path, source, launcher):
     run_git(path, ['config', 'core.autocrlf', 'false'], env)
     run_git(path, ['config', 'user.name', 'MRI provenance test'], env)
     run_git(path, ['config', 'user.email', 'mri-provenance@example.invalid'], env)
-    (path / 'SOURCE.txt').write_text(source, encoding='utf-8')
+    # Keep the synthetic Git blob identical on Windows and Unix. Text-mode
+    # writes otherwise translate LF to CRLF before the failing-environment
+    # reproduction compares the bytes returned by git show.
+    (path / 'SOURCE.txt').write_bytes(source.encode('utf-8'))
     (path / 'START-MRI-DRIVE-MAKER.cmd').write_text(launcher, encoding='utf-8', newline='')
     run_git(path, ['add', 'SOURCE.txt', 'START-MRI-DRIVE-MAKER.cmd'], env)
     run_git(path, ['commit', '-m', 'synthetic provenance fixture'], env)
