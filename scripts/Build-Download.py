@@ -15,26 +15,31 @@ parser.add_argument('--verify', type=Path)
 args = parser.parse_args()
 repo = Path(__file__).resolve().parent.parent
 
+def require(condition, message):
+    """Raise for failed release checks even when Python optimization is enabled."""
+    if not condition:
+        raise ValueError(message)
+
 def verify(path):
     with zipfile.ZipFile(path) as package:
-        assert package.testzip() is None, 'ZIP CRC check failed'
+        require(package.testzip() is None, 'ZIP CRC check failed')
         names = package.namelist()
         prefixes = {name.split('/')[0] for name in names}
-        assert len(prefixes) == 1, 'Expected one top-level directory'
+        require(len(prefixes) == 1, 'Expected one top-level directory')
         prefix = prefixes.pop() + '/'
         manifest = json.loads(package.read(prefix + 'RELEASE.json'))
         revision = manifest['source_commit']
-        assert re.fullmatch(r'[0-9a-f]{40}', revision), 'Invalid source commit'
-        assert set(names) == {prefix + name for name in manifest['sha256']} | {prefix + 'RELEASE.json'}, 'Unexpected package entries'
-        assert set(manifest['sha256']) == set(manifest['source_files']), 'Every packaged file must have a source origin'
+        require(re.fullmatch(r'[0-9a-f]{40}', revision) is not None, 'Invalid source commit')
+        require(set(names) == {prefix + name for name in manifest['sha256']} | {prefix + 'RELEASE.json'}, 'Unexpected package entries')
+        require(set(manifest['sha256']) == set(manifest['source_files']), 'Every packaged file must have a source origin')
         for name, source in manifest['source_files'].items():
             data = package.read(prefix + name)
-            assert hashlib.sha256(data).hexdigest() == manifest['sha256'][name], name
+            require(hashlib.sha256(data).hexdigest() == manifest['sha256'][name], name)
             expected = subprocess.check_output(['git', 'show', revision + ':' + source], cwd=repo)
-            assert data == expected, 'Source differs from its declared Git commit: ' + name
+            require(data == expected, 'Source differs from its declared Git commit: ' + name)
         launchers = [name for name in manifest['sha256'] if '/' not in name and name.lower().endswith(('.cmd', '.ps1', '.exe'))]
-        assert launchers == ['START-MRI-DRIVE-MAKER.cmd'], 'Competing launchers'
-        assert not any(name.startswith(('Developer/', 'legacy/')) for name in manifest['sha256']), 'Historical material belongs in the repository'
+        require(launchers == ['START-MRI-DRIVE-MAKER.cmd'], 'Competing launchers')
+        require(not any(name.startswith(('Developer/', 'legacy/')) for name in manifest['sha256']), 'Historical material belongs in the repository')
     return manifest
 
 if args.verify:

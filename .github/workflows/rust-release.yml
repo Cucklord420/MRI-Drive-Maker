@@ -4,6 +4,7 @@ on:
     paths:
       - 'rust/mri-release/**'
       - 'scripts/Build-Download.py'
+      - 'tests/BuildDownloadSmoke.py'
       - 'tests/PackageSmoke.ps1'
       - '.github/workflows/rust-release.yml'
   pull_request:
@@ -22,6 +23,12 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: Configure Python for original-verifier security tests
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - name: Verify release ZIP checks remain active under optimization
+        run: python tests/BuildDownloadSmoke.py
       - name: Rust release build and original Python differential tests
         run: cargo test --manifest-path rust/mri-release/Cargo.toml
   windows-release-smoke:
@@ -37,6 +44,11 @@ jobs:
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.13'
+      - name: Verify release ZIP checks remain active under optimization
+        shell: pwsh
+        run: |
+          python ./tests/BuildDownloadSmoke.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify byte-for-byte original Python ZIP parity on Windows
         shell: pwsh
         run: |
