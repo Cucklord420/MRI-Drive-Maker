@@ -229,6 +229,7 @@ class BuildDownloadSmoke(unittest.TestCase):
     def test_unsafe_windows_extraction_paths_are_rejected(self):
         cases = (
             ('../../outside.txt', 'README.md', 'Unsafe ZIP member path'),
+            ('App/../../outside.txt', 'README.md', 'Unsafe ZIP member path'),
             ('App\\outside.txt', 'README.md', None),
             ('App/CON.txt', 'README.md', 'Windows device alias'),
             ('App/trailing.', 'README.md', 'Windows-trimmed ZIP path component'),

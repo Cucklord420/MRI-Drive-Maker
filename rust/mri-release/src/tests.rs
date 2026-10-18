@@ -46,6 +46,8 @@ elif case == 'file-directory':
     add_source('App/path-conflict/child.txt', 'LICENSE')
 elif case == 'traversal':
     add_source('../../outside.txt', 'README.md')
+elif case == 'app-traversal':
+    add_source('App/../../outside.txt', 'README.md')
 elif case == 'windows-device':
     add_source('App/CON.txt', 'README.md')
 elif case == 'unicode':
@@ -223,6 +225,7 @@ fn python_and_rust_reject_windows_archive_aliases_and_unsafe_types() {
         ("case-alias",Some("Duplicate normalized package entries")),
         ("file-directory",Some("File/directory collision")),
         ("traversal",Some("Unsafe ZIP member path")),
+        ("app-traversal",Some("Unsafe ZIP member path")),
         ("windows-device",Some("Windows device alias")),
         ("unicode",Some("Non-ASCII")),
         ("backslash",None),
