@@ -122,7 +122,9 @@ public static class MRIStorageSmokeIsoWriter {
         Check ($resolved -notcontains [IO.Path]::GetFullPath($opened.Path)) 'A derived optical mount path was mistaken for a writable physical source disk.'
     }
     $part=Get-Partition -DiskNumber $disk.Number -PartitionNumber $part.PartitionNumber -ErrorAction Stop
-    Check ([string]::IsNullOrWhiteSpace([string]$part.DriveLetter)) "The owned fixture must have no drive letter for the volume-GUID-only test; current value is '$($part.DriveLetter)'."
+    $driveLetter=[string]$part.DriveLetter
+    $hasNoDriveLetter=[string]::IsNullOrWhiteSpace($driveLetter) -or $driveLetter -eq ([string][char]0)
+    Check $hasNoDriveLetter "The owned fixture must have no drive letter for the volume-GUID-only test; current value is '$($part.DriveLetter)'."
     Test-Storage 'A real volume GUID source path protects its backing disk identity' {
         $protected=@(Get-MRIProtectedKeys @($target.Path) @($drive))
         Check ($protected.Count -eq 1 -and $protected[0] -eq $drive.Key) 'The volume GUID path did not protect its backing disk.'
