@@ -30,7 +30,7 @@ jobs:
       - name: Verify release ZIP checks remain active under optimization
         run: python tests/BuildDownloadSmoke.py
       - name: Rust release build and original Python differential tests
-        run: cargo test --manifest-path rust/mri-release/Cargo.toml
+        run: cargo test --locked --manifest-path rust/mri-release/Cargo.toml
   windows-release-smoke:
     runs-on: windows-latest
     timeout-minutes: 20
@@ -52,15 +52,15 @@ jobs:
       - name: Verify byte-for-byte original Python ZIP parity on Windows
         shell: pwsh
         run: |
-          cargo test --manifest-path rust/mri-release/Cargo.toml
+          cargo test --locked --manifest-path rust/mri-release/Cargo.toml
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Produce and verify native Rust release candidate
         shell: pwsh
         run: |
           $archive=Join-Path $env:RUNNER_TEMP 'MRI-Rust-candidate.zip'
-          cargo run --manifest-path rust/mri-release/Cargo.toml -- --output $archive
+          cargo run --locked --manifest-path rust/mri-release/Cargo.toml -- --output $archive
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo run --manifest-path rust/mri-release/Cargo.toml -- --verify $archive
+          cargo run --locked --manifest-path rust/mri-release/Cargo.toml -- --verify $archive
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "RUST_RELEASE_CANDIDATE=$archive" >> $env:GITHUB_ENV
       - name: Test extracted Rust-built package and actual Windows launcher

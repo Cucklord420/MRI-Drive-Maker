@@ -10,7 +10,88 @@ fn python_builder(args:&[&str])->serde_json::Value {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
-fn members(path:&Path)->IndexMap<String,(Vec<u8>,(u16,u8,u8,u8,u8,u8))>{
+fn python_verify(path:&Path)->std::process::Output {
+    let script=repo_root().join("scripts/Build-Download.py");
+    Command::new("python3").arg(script).args(["--verify",path.to_str().unwrap()])
+        .current_dir(repo_root()).output().unwrap()
+}
+
+fn make_adversarial_archive(repo:&Path, source:&Path, destination:&Path, case:&str) {
+    let script=r#"
+import hashlib, json, stat, sys, zipfile
+source, destination, case, repo = sys.argv[1:]
+with zipfile.ZipFile(source) as package:
+    records = []
+    for info in package.infolist():
+        records.append([info.filename, package.read(info.filename), info.create_system, info.external_attr])
+manifest_name = next(name for name, _, _, _ in records if name.endswith('/RELEASE.json'))
+manifest_record = next(record for record in records if record[0] == manifest_name)
+manifest = json.loads(manifest_record[1])
+prefix = manifest_name.rsplit('/', 1)[0]
+def add_source(name, source_path):
+    import subprocess
+    data = subprocess.check_output(['git', 'show', manifest['source_commit'] + ':' + source_path], cwd=repo)
+    manifest['sha256'][name] = hashlib.sha256(data).hexdigest()
+    manifest['source_files'][name] = source_path
+    records.append([prefix + '/' + name, data, 3, (stat.S_IFREG | 0o644) << 16])
+if case == 'duplicate-payload':
+    target = next(record for record in records if record[0].endswith('/App/MRI-Batch.ps1'))
+    records.insert(records.index(target), [target[0], b'not approved payload', 3, (stat.S_IFREG | 0o644) << 16])
+elif case == 'duplicate-manifest':
+    records.insert(records.index(manifest_record), [manifest_name, b'not the approved manifest', 3, (stat.S_IFREG | 0o644) << 16])
+elif case == 'case-alias':
+    add_source('app/MRI-Batch.ps1', 'MRI-Batch.ps1')
+elif case == 'file-directory':
+    add_source('App/path-conflict', 'README.md')
+    add_source('App/path-conflict/child.txt', 'LICENSE')
+elif case == 'traversal':
+    add_source('../../outside.txt', 'README.md')
+elif case == 'windows-device':
+    add_source('App/CON.txt', 'README.md')
+elif case == 'unicode':
+    add_source('App/caf\u00e9.txt', 'README.md')
+elif case == 'backslash':
+    add_source('App\\\\outside.txt', 'README.md')
+elif case == 'symlink':
+    target = next(record for record in records if record[0].endswith('/App/MRI-Batch.ps1'))
+    target[3] = (stat.S_IFLNK | 0o777) << 16
+elif case == 'root-trailing-dot':
+    for record in records:
+        record[0] = record[0].replace(prefix + '/', prefix + './', 1)
+elif case == 'version-mismatch':
+    manifest['version'] = '9.9.9'
+else:
+    raise ValueError(case)
+if case not in ('duplicate-payload', 'duplicate-manifest', 'symlink'):
+    manifest_record[1] = (json.dumps(manifest, indent=2) + '\n').encode()
+with zipfile.ZipFile(destination, 'w', compression=zipfile.ZIP_STORED) as package:
+    for name, data, creator, attributes in records:
+        info = zipfile.ZipInfo(name, date_time=(2000, 1, 1, 0, 0, 0))
+        info.create_system = creator
+        info.external_attr = attributes
+        package.writestr(info, data)
+"#;
+    let result=Command::new("python3").arg("-c").arg(script)
+        .arg(source).arg(destination).arg(case).arg(repo)
+        .current_dir(repo).output().unwrap();
+    assert!(result.status.success(),"Could not create synthetic {case} archive: {}",
+        String::from_utf8_lossy(&result.stderr));
+}
+
+fn assert_both_verifiers_reject(repo:&Path, archive:&Path, expected:&str) {
+    let python=python_verify(archive);
+    assert!(!python.status.success(),"Original Python verifier accepted {}: {}",
+        archive.display(),String::from_utf8_lossy(&python.stdout));
+    assert!(String::from_utf8_lossy(&python.stderr).contains(expected),
+        "Python verifier did not report {expected}: {}",String::from_utf8_lossy(&python.stderr));
+    let rust=verify(repo,archive).unwrap_err();
+    assert!(rust.contains(expected),"Rust verifier reported {rust:?}, expected {expected:?}");
+}
+
+type ZipTimestamp=(u16,u8,u8,u8,u8,u8);
+type ZipMembers=IndexMap<String,(Vec<u8>,ZipTimestamp)>;
+
+fn members(path:&Path)->ZipMembers{
     let mut zip=ZipArchive::new(File::open(path).unwrap()).unwrap();
     let mut result=IndexMap::new();
     for n in 0..zip.len() {
@@ -105,5 +186,42 @@ fn manifest_is_derived_from_pinned_git_commit_not_working_tree() {
     for (name,source) in &manifest.source_files {
         let expected=committed(&repo_root(),&manifest.source_commit,source).unwrap();
         assert_eq!(digest(&expected),manifest.sha256[name],"source: {name}");
+    }
+}
+
+#[test]
+fn python_and_rust_reject_duplicate_release_members() {
+    let temp=tempfile::tempdir().unwrap();
+    let valid=temp.path().join("valid.zip");
+    build(&repo_root(),&valid,"0.3.0").unwrap();
+    for (case,expected) in [
+        ("duplicate-payload","Duplicate package entries"),
+        ("duplicate-manifest","Duplicate package entries"),
+    ] {
+        let archive=temp.path().join(format!("{case}.zip"));
+        make_adversarial_archive(&repo_root(),&valid,&archive,case);
+        assert_both_verifiers_reject(&repo_root(),&archive,expected);
+    }
+}
+
+#[test]
+fn python_and_rust_reject_windows_archive_aliases_and_unsafe_types() {
+    let temp=tempfile::tempdir().unwrap();
+    let valid=temp.path().join("valid.zip");
+    build(&repo_root(),&valid,"0.3.0").unwrap();
+    for (case,expected) in [
+        ("case-alias","Duplicate normalized package entries"),
+        ("file-directory","File/directory collision"),
+        ("traversal","Unsafe ZIP member path"),
+        ("windows-device","Windows device alias"),
+        ("unicode","Non-ASCII"),
+        ("backslash","Noncanonical ZIP member path"),
+        ("symlink","Unexpected ZIP member type"),
+        ("root-trailing-dot","Windows-trimmed package root"),
+        ("version-mismatch","Package version does not match its root"),
+    ] {
+        let archive=temp.path().join(format!("{case}.zip"));
+        make_adversarial_archive(&repo_root(),&valid,&archive,case);
+        assert_both_verifiers_reject(&repo_root(),&archive,expected);
     }
 }

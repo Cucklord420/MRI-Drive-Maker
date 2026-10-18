@@ -41,31 +41,107 @@ fn committed(repo: &Path, revision: &str, path: &str) -> Result<Vec<u8>, String>
 fn manifest_name(source: &str, prefix: &str) -> String {
     format!("{prefix}{source}")
 }
+fn canonical_member_name(name: &str) -> Result<(String, String), String> {
+    if !name.is_ascii() {
+        return Err("Non-ASCII ZIP member names are not allowed".into());
+    }
+    if name.as_bytes().contains(&0) || name.contains('\\') {
+        return Err("Noncanonical ZIP member path".into());
+    }
+    if name.len() > 200 {
+        return Err("ZIP member path is too long".into());
+    }
+    let parts: Vec<&str> = name.split('/').collect();
+    if parts.len() < 2 || parts.iter().any(|part| part.is_empty()) {
+        return Err("Noncanonical ZIP member path".into());
+    }
+    let root_re = Regex::new(r"^MRI-Drive-Maker-v([A-Za-z0-9][A-Za-z0-9._-]{0,48})$").unwrap();
+    let root = parts[0];
+    let captures = root_re.captures(root).ok_or("Invalid package root")?;
+    if root.ends_with('.') {
+        return Err("Windows-trimmed package root".into());
+    }
+    let component_re = Regex::new(r"^[A-Za-z0-9._-]+$").unwrap();
+    for component in &parts[1..] {
+        if *component == "." || *component == ".." || component.ends_with('.')
+            || !component_re.is_match(component)
+        {
+            return Err("Unsafe ZIP member path".into());
+        }
+        let stem = component.split('.').next().unwrap_or("").to_ascii_uppercase();
+        if matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" |
+            "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" |
+            "COM7" | "COM8" | "COM9" | "LPT1" | "LPT2" | "LPT3" |
+            "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9")
+        {
+            return Err("Windows device alias in ZIP member path".into());
+        }
+    }
+    Ok((captures[1].to_owned(), name.to_ascii_lowercase()))
+}
 fn verify(repo: &Path, archive_path: &Path) -> Result<Manifest, String> {
     let file = File::open(archive_path).map_err(|e| e.to_string())?;
     let mut zip = ZipArchive::new(file).map_err(|e| e.to_string())?;
+    if let Err(error) = zip.validate_header_consistency() {
+        let message = error.to_string();
+        if message.contains("duplicate file names") {
+            return Err("Duplicate package entries".into());
+        }
+        return Err(format!("Invalid ZIP member headers: {message}"));
+    }
     let mut names = BTreeSet::new();
+    let mut canonical_names = BTreeSet::new();
+    let mut canonical_paths = Vec::new();
     let mut prefixes = BTreeSet::new();
     let mut files = HashMap::new();
     for index in 0..zip.len() {
         let mut member = zip.by_index(index).map_err(|e| e.to_string())?;
         let name = member.name().map_err(|e| e.to_string())?.into_owned();
+        if member.name_raw() != name.as_bytes() {
+            return Err("Noncanonical ZIP member name encoding".into());
+        }
         if !names.insert(name.clone()) {
             return Err("Duplicate package entries".into());
         }
-        prefixes.insert(name.split('/').next().unwrap_or("").to_owned());
+        if member.is_dir() || member.is_symlink() {
+            return Err("Unexpected ZIP member type".into());
+        }
+        let mode = member.unix_mode().ok_or("Unexpected ZIP member type")?;
+        if mode & 0o170000 != 0o100000 {
+            return Err("Unexpected ZIP member type".into());
+        }
+        let (version, canonical) = canonical_member_name(&name)?;
+        if !canonical_names.insert(canonical.clone()) {
+            return Err("Duplicate normalized package entries".into());
+        }
+        canonical_paths.push(canonical);
+        prefixes.insert(format!("MRI-Drive-Maker-v{version}"));
         let mut contents = Vec::new();
         member.read_to_end(&mut contents).map_err(|e|format!("ZIP CRC failure: {e}"))?;
         files.insert(name, contents);
     }
+    for path in &canonical_paths {
+        let parts: Vec<&str> = path.split('/').collect();
+        for index in 1..parts.len() {
+            let parent = parts[..index].join("/");
+            if canonical_names.contains(&parent) {
+                return Err("File/directory collision in ZIP member paths".into());
+            }
+        }
+    }
     if prefixes.len() != 1 {
         return Err("Expected one top-level directory".into());
     }
-    let prefix = prefixes.iter().next().unwrap().to_owned() + "/";
+    let root = prefixes.iter().next().unwrap();
+    let version = root.strip_prefix("MRI-Drive-Maker-v").ok_or("Invalid package root")?;
+    let prefix = root.to_owned() + "/";
     let manifest_bytes = files.get(&(prefix.clone()+"RELEASE.json"))
         .ok_or("Missing RELEASE.json")?;
     let manifest: Manifest = serde_json::from_slice(manifest_bytes)
         .map_err(|e| format!("Bad RELEASE.json: {e}"))?;
+    if manifest.version != version {
+        return Err("Package version does not match its root".into());
+    }
     if !Regex::new(r"^[a-f0-9]{40}$").unwrap().is_match(&manifest.source_commit) {
         return Err("Invalid source commit".into());
     }
@@ -163,7 +239,8 @@ fn normalize_zip_creator_version(path:&Path)->Result<(),String>{
 }
 
 fn build(repo:&Path, path:&Path, version:&str)->Result<Manifest,String>{
-    if !Regex::new(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,48}$").unwrap().is_match(version) {
+    if !Regex::new(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,48}$").unwrap().is_match(version)
+        || version.ends_with('.') {
         return Err("Version contains unsupported path characters".into());
     }
     if path.exists() {
