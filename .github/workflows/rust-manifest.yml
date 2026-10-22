@@ -6,6 +6,7 @@ on:
       - 'MRI.Batch.psm1'
       - 'tests/RustManifestParity.ps1'
       - 'tests/RustManifestMatchParity.ps1'
+      - 'tests/RustSourceKindParity.ps1'
       - '.github/workflows/rust-manifest.yml'
   pull_request:
   workflow_dispatch:
@@ -30,6 +31,9 @@ jobs:
         run: cargo clippy --manifest-path rust/mri-manifest/Cargo.toml --all-targets -- -D warnings
       - name: Build read-only Rust manifest CLI
         run: cargo build --manifest-path rust/mri-manifest/Cargo.toml
+      - name: Compare original PowerShell and Rust source-kind decisions
+        shell: powershell
+        run: ./tests/RustSourceKindParity.ps1
       - name: Compare 400 synthetic manifests with real Get-MRIManifest
         shell: powershell
         run: ./tests/RustManifestParity.ps1
