@@ -8,8 +8,8 @@ mod identity;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::io::{self, Read};
 use std::fs;
+use std::io::{self, Read};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -51,7 +51,10 @@ fn same(a: &str, b: &str) -> bool {
 
 fn block_reason<'a>(disk: &'a Disk, request: &'a Request) -> Option<String> {
     if disk.key.trim().is_empty() {
-        return Some(format!("Hardware identity unavailable: {}", disk.identity_error));
+        return Some(format!(
+            "Hardware identity unavailable: {}",
+            disk.identity_error
+        ));
     }
     if !same(&disk.bus_type, "USB") || disk.is_boot || disk.is_system {
         return Some("Boot, system, and non-USB disks are excluded.".into());
@@ -59,13 +62,23 @@ fn block_reason<'a>(disk: &'a Disk, request: &'a Request) -> Option<String> {
     if disk.is_offline || disk.is_read_only {
         return Some("Drive is offline or write protected.".into());
     }
-    if request.protected_keys.iter().any(|key| same(key, &disk.key)) {
+    if request
+        .protected_keys
+        .iter()
+        .any(|key| same(key, &disk.key))
+    {
         return Some("This disk contains the source files or the automation itself.".into());
     }
     if disk.size < request.minimum_disk_bytes || disk.size > request.maximum_disk_bytes {
         return Some("Capacity is outside the configured MRI range.".into());
     }
-    if request.inventory.iter().filter(|other| same(&other.serial, &disk.serial)).count() != 1 {
+    if request
+        .inventory
+        .iter()
+        .filter(|other| same(&other.serial, &disk.serial))
+        .count()
+        != 1
+    {
         return Some("Duplicate USB serial number; cannot identify this drive safely.".into());
     }
     None
@@ -82,14 +95,21 @@ fn select(request: &Request) -> Result<Vec<i32>, String> {
     let mut numbers = Vec::new();
     let mut seen = HashSet::new();
     for part in request.selection.split(',') {
-        let number = part.trim().parse::<i32>().map_err(|_| "Invalid disk number.")?;
+        let number = part
+            .trim()
+            .parse::<i32>()
+            .map_err(|_| "Invalid disk number.")?;
         if seen.insert(number) {
             numbers.push(number);
         }
     }
     // Validate entire selection before allowing any selected disk to be returned.
     for number in &numbers {
-        let matches: Vec<&Disk> = request.inventory.iter().filter(|disk| disk.number == *number).collect();
+        let matches: Vec<&Disk> = request
+            .inventory
+            .iter()
+            .filter(|disk| disk.number == *number)
+            .collect();
         if matches.len() != 1 {
             return Err(format!("Disk {number} was not in the displayed USB list."));
         }
@@ -108,11 +128,26 @@ fn respond(request: &Request) -> Response {
             } else {
                 let mut sorted = selected.clone();
                 sorted.sort_unstable();
-                Some(format!("ERASE {}", sorted.iter().map(i32::to_string).collect::<Vec<_>>().join(",")))
+                Some(format!(
+                    "ERASE {}",
+                    sorted
+                        .iter()
+                        .map(i32::to_string)
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ))
             };
-            Response { selected, confirmation, error: None }
+            Response {
+                selected,
+                confirmation,
+                error: None,
+            }
         }
-        Err(error) => Response { selected: vec![], confirmation: None, error: Some(error) }
+        Err(error) => Response {
+            selected: vec![],
+            confirmation: None,
+            error: Some(error),
+        },
     }
 }
 
@@ -124,15 +159,20 @@ fn main() {
                 eprintln!("Could not read UTF-8 hardware identity JSON.");
                 std::process::exit(2)
             });
-            let record: identity::HardwareIdentity = serde_json::from_str(&raw)
-                .unwrap_or_else(|_| {
+            let record: identity::HardwareIdentity =
+                serde_json::from_str(&raw).unwrap_or_else(|_| {
                     eprintln!("Invalid hardware identity JSON. No disk can be approved.");
                     std::process::exit(2)
                 });
             let result = identity::evaluate(&record);
             let failed = result.error.is_some();
-            println!("{}", serde_json::to_string(&result).expect("response serialization"));
-            if failed { std::process::exit(1); }
+            println!(
+                "{}",
+                serde_json::to_string(&result).expect("response serialization")
+            );
+            if failed {
+                std::process::exit(1);
+            }
             return;
         }
     }
@@ -147,12 +187,11 @@ fn main() {
             }
             content
         }
-        [_, flag, filename] if flag == "--input-file" => {
-            fs::read_to_string(filename).unwrap_or_else(|_| {
+        [_, flag, filename] if flag == "--input-file" => fs::read_to_string(filename)
+            .unwrap_or_else(|_| {
                 eprintln!("Could not read UTF-8 selection file.");
                 std::process::exit(2);
-            })
-        }
+            }),
         _ => {
             eprintln!("Usage: mri-safety [--input-file PATH]");
             std::process::exit(2);
@@ -166,7 +205,10 @@ fn main() {
         }
     };
     let output = respond(&request);
-    println!("{}", serde_json::to_string(&output).expect("serializable response"));
+    println!(
+        "{}",
+        serde_json::to_string(&output).expect("serializable response")
+    );
     if output.error.is_some() {
         std::process::exit(1);
     }
@@ -200,8 +242,11 @@ mod tests {
     }
     #[test]
     fn valid_multiple_and_duplicate_selection() {
-        assert_eq!(respond(&request("8,6,7,8")).selected, vec![8,6,7]);
-        assert_eq!(respond(&request("8,6,7,8")).confirmation.as_deref(), Some("ERASE 6,7,8"));
+        assert_eq!(respond(&request("8,6,7,8")).selected, vec![8, 6, 7]);
+        assert_eq!(
+            respond(&request("8,6,7,8")).confirmation.as_deref(),
+            Some("ERASE 6,7,8")
+        );
         assert_eq!(respond(&request("\n\t ")).selected, Vec::<i32>::new());
     }
     #[test]
@@ -236,7 +281,10 @@ mod tests {
     #[test]
     fn unknown_or_reused_disk_numbers_rejected() {
         let bad = respond(&request("6,5"));
-        assert_eq!(bad.error.as_deref(), Some("Disk 5 was not in the displayed USB list."));
+        assert_eq!(
+            bad.error.as_deref(),
+            Some("Disk 5 was not in the displayed USB list.")
+        );
         let mut duplicate = request("6");
         duplicate.inventory.push(disk(6, "OTHER"));
         assert!(respond(&duplicate).error.is_some());
@@ -245,14 +293,20 @@ mod tests {
     fn hundred_deterministic_variations_have_strict_approval() {
         for i in 0..100 {
             let mut q = request("8,6");
-            if i % 2 == 1 { q.inventory[0].is_boot = true; }
-            if i % 3 == 2 { q.inventory[2].is_read_only = true; }
-            if i % 5 == 4 { q.protected_keys.push("KEY_6".into()); }
+            if i % 2 == 1 {
+                q.inventory[0].is_boot = true;
+            }
+            if i % 3 == 2 {
+                q.inventory[2].is_read_only = true;
+            }
+            if i % 5 == 4 {
+                q.protected_keys.push("KEY_6".into());
+            }
             let result = respond(&q);
             let allowed = i % 2 == 0 && i % 3 != 2 && i % 5 != 4;
             assert_eq!(result.error.is_none(), allowed, "variation {i}");
             if allowed {
-                assert_eq!(result.selected, [8,6]);
+                assert_eq!(result.selected, [8, 6]);
                 assert_eq!(result.confirmation.as_deref(), Some("ERASE 6,8"));
             } else {
                 assert!(result.selected.is_empty());
@@ -263,9 +317,15 @@ mod tests {
     fn serial_and_key_matching_is_case_insensitive() {
         let mut q = request("6");
         q.inventory[1].serial = "serial6".into();
-        assert_eq!(respond(&q).error.unwrap(), "Disk 6: Duplicate USB serial number; cannot identify this drive safely.");
+        assert_eq!(
+            respond(&q).error.unwrap(),
+            "Disk 6: Duplicate USB serial number; cannot identify this drive safely."
+        );
         let mut q = request("6");
         q.protected_keys.push("key_6".into());
-        assert_eq!(respond(&q).error.unwrap(), "Disk 6: This disk contains the source files or the automation itself.");
+        assert_eq!(
+            respond(&q).error.unwrap(),
+            "Disk 6: This disk contains the source files or the automation itself."
+        );
     }
 }
