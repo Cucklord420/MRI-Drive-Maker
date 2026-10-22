@@ -10,8 +10,20 @@ $module=Get-Module MRI.Batch
     $script:ProtectedPathPartitions=@()
     $script:ProtectedPathDisks=@()
     $script:ProtectedPathShares=@()
+    $script:ProtectedPathInventory=@()
+    $script:ProtectedPathHardware=@()
+    $script:ProtectedPathPartitionSequence=[Collections.Generic.List[object]]::new()
+    $script:ProtectedPathPartitionCalls=0
+    $script:ProtectedPathClearCalls=0
+    $script:RealInitializeMRITarget=${function:Initialize-MRITarget}
+    function script:Get-MRIInventory { $script:ProtectedPathInventory }
     function script:Get-Partition {
         [CmdletBinding()] param()
+        if ($script:ProtectedPathPartitionSequence.Count) {
+            $index=[Math]::Min($script:ProtectedPathPartitionCalls,$script:ProtectedPathPartitionSequence.Count-1)
+            $script:ProtectedPathPartitionCalls++
+            return $script:ProtectedPathPartitionSequence[$index]
+        }
         $script:ProtectedPathPartitions
     }
     function script:Get-Disk {
@@ -20,10 +32,16 @@ $module=Get-Module MRI.Batch
     }
     function script:Get-CimInstance {
         [CmdletBinding()] param([string]$ClassName,[string]$Filter)
+        if ($ClassName -eq 'Win32_DiskDrive') { return $script:ProtectedPathHardware }
         if ($ClassName -eq 'Win32_Share') { return $script:ProtectedPathShares }
         if ($ClassName -eq 'Win32_ComputerSystem') { return [pscustomobject]@{Name='MRI-HOST';DNSHostName='MRI-HOST';Domain='TEST'} }
         if ($ClassName -eq 'Win32_NetworkAdapterConfiguration') { return [pscustomobject]@{IPAddress=@('192.0.2.10')} }
         throw "Unexpected CIM query in protected-path fixture: $ClassName"
+    }
+    function script:Clear-Disk {
+        [CmdletBinding()] param($InputObject,[switch]$RemoveData,[switch]$RemoveOEM,[switch]$Confirm)
+        $script:ProtectedPathClearCalls++
+        throw 'Test intercepted Clear-Disk.'
     }
 }
 function Set-ProtectedFixtures {
@@ -183,6 +201,59 @@ try {
     Set-ProtectedFixtures @([pscustomobject]@{DiskNumber=13;AccessPaths=@()}) @()
     Throws { Get-MRIProtectedKeys @($unmountedPath) @() } 'Could not map'
     Write-Host 'PASS an unmounted volume with no access paths cannot be resolved'
+
+    & {
+        $sourceRoot=Join-Path $temp 'source-remapped-between-checks'
+        [void][IO.Directory]::CreateDirectory($sourceRoot)
+        $sourcePath=Join-Path $sourceRoot 'source.iso'
+        $hostRoot=[IO.Path]::GetPathRoot($temp)
+        $drive=[pscustomobject]@{
+            Key=(Get-MRIDriveKey 'SOURCE-REMAPPED' 'USB\SOURCE-REMAPPED' 'TEST TARGET' 32000000000)
+            Number=12;Serial='SOURCE-REMAPPED';PnpId='USB\SOURCE-REMAPPED';Model='TEST TARGET'
+            Size=[long]32000000000;IsBoot=$false;IsSystem=$false;IsReadOnly=$false;IsOffline=$false
+            BusType='USB';IdentityError=''
+        }
+        $record=[pscustomobject]@{Key=$drive.Key;Serial=$drive.Serial;PnpId=$drive.PnpId;Model=$drive.Model
+            Size=$drive.Size;Label='MRI_TEST';AllowErase=$true}
+        $targetDisk=[pscustomobject]@{Number=12;PartitionStyle='GPT';SerialNumber=$drive.Serial
+            FriendlyName=$drive.Model;Size=$drive.Size;BusType='USB';IsBoot=$false;IsSystem=$false
+            IsOffline=$false;IsReadOnly=$false}
+        $hostDisk=[pscustomobject]@{Number=0;BusType='SATA'}
+        $hardware=[pscustomobject]@{Index=12;SerialNumber=$drive.Serial;PNPDeviceID=$drive.PnpId}
+        $config=Read-MRIJson (Join-Path $root 'mri-config.example.json')
+        $config.SourcePath=$temp; $config.MinimumDiskBytes=1; $config.MaximumDiskBytes=[long]64000000000
+        $fixtures=[pscustomobject]@{
+            Inventory=@($drive);Disks=@($targetDisk,$hostDisk);Hardware=@($hardware)
+            Initial=@([pscustomobject]@{DiskNumber=0;AccessPaths=@($hostRoot)})
+            Remapped=@(
+                [pscustomobject]@{DiskNumber=0;AccessPaths=@($hostRoot)}
+                [pscustomobject]@{DiskNumber=12;AccessPaths=@($sourceRoot+[IO.Path]::DirectorySeparatorChar)}
+            )
+        }
+        & $module {
+            param($value)
+            $script:ProtectedPathInventory=[object[]]$value.Inventory
+            $script:ProtectedPathDisks=[object[]]$value.Disks
+            $script:ProtectedPathHardware=[object[]]$value.Hardware
+            $script:ProtectedPathPartitionSequence.Clear()
+            [void]$script:ProtectedPathPartitionSequence.Add([object[]]$value.Initial)
+            [void]$script:ProtectedPathPartitionSequence.Add([object[]]$value.Remapped)
+            $script:ProtectedPathPartitionCalls=0
+            $script:ProtectedPathClearCalls=0
+        } $fixtures
+        $message=''
+        try {
+            & $module {
+                param($fixtureRecord,$fixtureConfig,$fixtureNumber,$fixturePath)
+                & $script:RealInitializeMRITarget $fixtureRecord $fixtureConfig @() $fixtureNumber '' @($fixturePath) | Out-Null
+            } $record $config $drive.Number $sourcePath
+        } catch { $message=$_.Exception.Message }
+        $observed=& $module { [pscustomobject]@{PartitionCalls=$script:ProtectedPathPartitionCalls;ClearCalls=$script:ProtectedPathClearCalls} }
+        Check ($message -match 'now contains a source or automation path') "The remapped source was not rejected by the second erase guard. Observed: '$message'."
+        Check ($observed.PartitionCalls -eq 2) "The test did not exercise both source-to-disk lookups. Observed $($observed.PartitionCalls)."
+        Check ($observed.ClearCalls -eq 0) "Clear-Disk was reached after the source remapped to the selected disk. Observed $($observed.ClearCalls) call(s)."
+        Write-Host 'PASS a source remapped after the first target check is blocked before Clear-Disk'
+    }
     Write-Host 'Protected-path behavior checks completed; no physical storage was accessed.'
 } finally {
     Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
