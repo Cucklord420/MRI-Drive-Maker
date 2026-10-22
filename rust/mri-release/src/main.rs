@@ -6,6 +6,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap};
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -26,22 +27,131 @@ fn repo_root() -> PathBuf {
 fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
-fn git(repo: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
-    let output = Command::new("git").args(args).current_dir(repo).output()
-        .map_err(|e| e.to_string())?;
+fn is_git_environment_key(key: &OsStr) -> bool {
+    key.to_string_lossy().to_ascii_uppercase().starts_with("GIT_")
+}
+fn process_environment() -> Vec<(OsString, OsString)> {
+    std::env::vars_os().collect()
+}
+fn git_command(repo: &Path, args: &[&str], environment: &[(OsString, OsString)])
+    -> Result<Vec<u8>, String> {
+    let mut command = Command::new("git");
+    command.args(args).current_dir(repo).env_clear();
+    for (key, value) in environment {
+        if !is_git_environment_key(key) {
+            command.env(key, value);
+        }
+    }
+    let output = command.output().map_err(|e| e.to_string())?;
     if !output.status.success() {
         return Err(format!("Git source lookup failed: {}",
             String::from_utf8_lossy(&output.stderr)));
     }
     Ok(output.stdout)
 }
+fn repository_layout(repo: &Path) -> Result<(PathBuf, PathBuf, PathBuf), String> {
+    let root = repo.canonicalize().map_err(|e| format!("Cannot resolve intended worktree: {e}"))?;
+    if !root.is_dir() {
+        return Err("The intended Git worktree is not a directory".into());
+    }
+    let metadata = root.join(".git");
+    let (git_dir, common_dir) = if metadata.is_dir() {
+        let git_dir = metadata.canonicalize()
+            .map_err(|e| format!("Cannot resolve intended Git directory: {e}"))?;
+        (git_dir.clone(), git_dir)
+    } else if metadata.is_file() {
+        let contents = fs::read_to_string(&metadata)
+            .map_err(|e| format!("Cannot read intended .git file: {e}"))?;
+        let line = contents.strip_suffix('\n').unwrap_or(&contents);
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        let Some(git_dir_ref) = line.strip_prefix("gitdir: ") else {
+            return Err("The intended Git worktree has an invalid .git file".into());
+        };
+        if git_dir_ref.contains(['\n', '\r']) {
+            return Err("The intended Git worktree has an ambiguous .git file".into());
+        }
+        let git_dir_ref = PathBuf::from(git_dir_ref);
+        let git_dir = if git_dir_ref.is_absolute() {
+            git_dir_ref
+        } else {
+            root.join(git_dir_ref)
+        }.canonicalize().map_err(|e| format!("Cannot resolve linked worktree Git directory: {e}"))?;
+        let common_file = git_dir.join("commondir");
+        if !common_file.is_file() {
+            return Err("Only linked Git worktrees with a commondir file are supported".into());
+        }
+        let common_ref = fs::read_to_string(&common_file)
+            .map_err(|e| format!("Cannot read linked worktree commondir: {e}"))?;
+        let common_ref = common_ref.trim_end_matches(['\r', '\n']);
+        if common_ref.is_empty() || common_ref.contains(['\r', '\n']) {
+            return Err("The linked worktree has an invalid commondir file".into());
+        }
+        let common_ref = PathBuf::from(common_ref);
+        let common_dir = if common_ref.is_absolute() {
+            common_ref
+        } else {
+            git_dir.join(common_ref)
+        }.canonicalize().map_err(|e| format!("Cannot resolve common Git directory: {e}"))?;
+        let worktrees = common_dir.join("worktrees").canonicalize()
+            .map_err(|e| format!("Cannot resolve common worktree metadata directory: {e}"))?;
+        if git_dir.parent() != Some(worktrees.as_path()) {
+            return Err("Linked worktree metadata is outside its common repository".into());
+        }
+        (git_dir, common_dir)
+    } else {
+        return Err("The intended source directory is not a Git worktree".into());
+    };
+    Ok((root, git_dir, common_dir))
+}
+fn git_path(bytes: Vec<u8>, label: &str) -> Result<PathBuf, String> {
+    let value = String::from_utf8(bytes).map_err(|_| format!("Git returned a non-UTF-8 {label}"))?;
+    let value = value.strip_suffix('\n').ok_or_else(|| format!("Git returned an incomplete {label}"))?;
+    let value = value.strip_suffix('\r').unwrap_or(value);
+    if value.contains(['\n', '\r']) {
+        return Err(format!("Git returned an ambiguous {label}"));
+    }
+    Path::new(value).canonicalize().map_err(|e| format!("Cannot resolve Git {label}: {e}"))
+}
+fn assert_git_identity(repo: &Path, environment: &[(OsString, OsString)]) -> Result<(), String> {
+    let (root, expected_git_dir, expected_common_dir) = repository_layout(repo)?;
+    let actual_root = git_path(git_command(&root,
+        &["rev-parse", "--path-format=absolute", "--show-toplevel"], environment)?, "worktree root")?;
+    let actual_git_dir = git_path(git_command(&root,
+        &["rev-parse", "--absolute-git-dir"], environment)?, "Git directory")?;
+    let actual_common_dir = git_path(git_command(&root,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"], environment)?, "common Git directory")?;
+    if actual_root != root || actual_git_dir != expected_git_dir || actual_common_dir != expected_common_dir {
+        return Err("Git resolved a different worktree or repository than the intended source".into());
+    }
+    Ok(())
+}
+fn git_with_environment(repo: &Path, args: &[&str], environment: &[(OsString, OsString)])
+    -> Result<Vec<u8>, String> {
+    assert_git_identity(repo, environment)?;
+    let root = repo.canonicalize().map_err(|e| format!("Cannot resolve intended worktree: {e}"))?;
+    git_command(&root, args, environment)
+}
+#[cfg(test)]
+fn git(repo: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
+    git_with_environment(repo, args, &process_environment())
+}
+#[cfg(test)]
 fn committed(repo: &Path, revision: &str, path: &str) -> Result<Vec<u8>, String> {
     git(repo, &["show", &format!("{revision}:{path}")])
+}
+fn committed_with_environment(repo: &Path, revision: &str, path: &str,
+    environment: &[(OsString, OsString)]) -> Result<Vec<u8>, String> {
+    git_with_environment(repo, &["show", &format!("{revision}:{path}")], environment)
 }
 fn manifest_name(source: &str, prefix: &str) -> String {
     format!("{prefix}{source}")
 }
 fn verify(repo: &Path, archive_path: &Path) -> Result<Manifest, String> {
+    verify_with_environment(repo, archive_path, &process_environment())
+}
+fn verify_with_environment(repo: &Path, archive_path: &Path,
+    environment: &[(OsString, OsString)]) -> Result<Manifest, String> {
+    assert_git_identity(repo, environment)?;
     let file = File::open(archive_path).map_err(|e| e.to_string())?;
     let mut zip = ZipArchive::new(file).map_err(|e| e.to_string())?;
     let mut names = BTreeSet::new();
@@ -85,7 +195,7 @@ fn verify(repo: &Path, archive_path: &Path) -> Result<Manifest, String> {
         if digest(contents) != manifest.sha256[name] {
             return Err(format!("Package file SHA-256 mismatch: {name}"));
         }
-        if committed(repo, &manifest.source_commit, source)? != *contents {
+        if committed_with_environment(repo, &manifest.source_commit, source, environment)? != *contents {
             return Err(format!("Source differs from declared Git commit: {name}"));
         }
     }
@@ -162,41 +272,50 @@ fn normalize_zip_creator_version(path:&Path)->Result<(),String>{
     output.flush().map_err(|e|e.to_string())
 }
 
-fn build(repo:&Path, path:&Path, version:&str)->Result<Manifest,String>{
+fn package_sources(repo: &Path) -> Result<Vec<(String, String)>, String> {
+    let mut sources = Vec::new();
+    for name in ["START-MRI-DRIVE-MAKER.cmd", "READ-ME-FIRST.txt", "LICENSE", "NOTICE.md"] {
+        sources.push((name.to_owned(), name.to_owned()));
+    }
+    for name in ["MRI-Batch.ps1", "MRI.Batch.psm1", "Copy-MRIFiles.ps1",
+        "NativeProcess.cs", "mri-config.example.json", "LICENSE"] {
+        sources.push((name.to_owned(), format!("App/{name}")));
+    }
+    let mut tests = Vec::new();
+    for item in fs::read_dir(repo.join("tests")).map_err(|e| e.to_string())? {
+        let entry = item.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if path.extension().is_some_and(|extension| extension == "ps1") {
+            tests.push(path.file_name().unwrap().to_string_lossy().into_owned());
+        }
+    }
+    tests.sort();
+    for name in tests {
+        sources.push((format!("tests/{name}"), format!("App/tests/{name}")));
+    }
+    Ok(sources)
+}
+fn build_with_environment(repo: &Path, path: &Path, version: &str,
+    sources: &[(String, String)], environment: &[(OsString, OsString)]) -> Result<Manifest, String> {
+    assert_git_identity(repo, environment)?;
     if !Regex::new(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,48}$").unwrap().is_match(version) {
         return Err("Version contains unsupported path characters".into());
     }
     if path.exists() {
         return Err(format!("Refusing to overwrite existing download: {}",path.display()));
     }
-    let revision=String::from_utf8(git(repo,&["rev-parse","HEAD"])?)
+    let revision=String::from_utf8(git_with_environment(repo,&["rev-parse","HEAD"],environment)?)
         .map_err(|e|e.to_string())?.trim().to_owned();
     let mut entries=IndexMap::<String,Vec<u8>>::new();
     let mut origins=IndexMap::<String,String>::new();
     let mut insert=|source:&str,dest:&str|->Result<(),String>{
-        let content=committed(repo,&revision,source)?;
+        let content=committed_with_environment(repo,&revision,source,environment)?;
         entries.insert(dest.to_owned(),content);
         origins.insert(dest.to_owned(),source.to_owned());
         Ok(())
     };
-    for name in ["START-MRI-DRIVE-MAKER.cmd","READ-ME-FIRST.txt","LICENSE","NOTICE.md"] {
-        insert(name,name)?;
-    }
-    for name in ["MRI-Batch.ps1","MRI.Batch.psm1","Copy-MRIFiles.ps1",
-        "NativeProcess.cs","mri-config.example.json","LICENSE"] {
-        insert(name,&format!("App/{name}"))?;
-    }
-    let mut tests=Vec::new();
-    for item in fs::read_dir(repo.join("tests")).map_err(|e|e.to_string())?{
-        let entry=item.map_err(|e|e.to_string())?;
-        let path=entry.path();
-        if path.extension().is_some_and(|x|x=="ps1"){
-            tests.push(path.file_name().unwrap().to_string_lossy().into_owned());
-        }
-    }
-    tests.sort();
-    for name in tests {
-        insert(&format!("tests/{name}"),&format!("App/tests/{name}"))?;
+    for (source, destination) in sources {
+        insert(source, destination)?;
     }
     drop(insert);
     let sha256:IndexMap<String,String> = entries.iter()
@@ -233,11 +352,15 @@ fn build(repo:&Path, path:&Path, version:&str)->Result<Manifest,String>{
     }
     zip.finish().map_err(|e|e.to_string())?;
     normalize_zip_creator_version(path)?;
-    let checked=verify(repo,path)?;
+    let checked=verify_with_environment(repo,path,environment)?;
     if checked!=manifest {
         return Err("Release verification differs from original manifest".into());
     }
     Ok(manifest)
+}
+fn build(repo: &Path, path: &Path, version: &str) -> Result<Manifest, String> {
+    let sources = package_sources(repo)?;
+    build_with_environment(repo, path, version, &sources, &process_environment())
 }
 fn main(){
     let mut version="0.3.0".to_owned();
