@@ -26,6 +26,18 @@ function Test-Identity {
     } catch {
         $expectedError=$_.Exception.Message
     }
+    if ($Size -le 0) {
+        # The PowerShell helper hashes any i64, but Windows Get-Disk capacities
+        # are positive. The Rust policy intentionally fails closed on invalid
+        # input; make that documented deviation explicit in this parity test.
+        if ($null -ne $expectedError -or [string]::IsNullOrEmpty($original)) {
+            throw "PowerShell reference behavior changed for nonpositive size $Size; re-review the Rust safety deviation."
+        }
+        if ($resultCode -eq 0 -or $result.Key -or $result.Error -cne 'Disk size must be positive.') {
+            throw "Rust did not reject nonpositive synthetic disk size $Size."
+        }
+        return
+    }
     if ($null -ne $expectedError) {
         if ($resultCode -eq 0 -or $result.Key -or $result.Error -cne $expectedError) {
             throw "Identity error mismatch for synthetic serial '$Serial': Rust '$($result.Error)' / PowerShell '$expectedError'"
@@ -46,5 +58,5 @@ Test-Identity -Serial 'SERIAL' -PnpId '' -Model 'Model' -Size 32000000000
 Test-Identity -Serial 'SERIAL' -PnpId 'USB\VID_1234' -Model '' -Size 32000000000
 Test-Identity -Serial 'SERIAL' -PnpId 'USB\VID_1234' -Model 'Model' -Size 0
 Test-Identity -Serial 'SERIAL' -PnpId 'USB\VID_1234' -Model 'Model' -Size -1
-Write-Host 'PASS: 113 synthetic SHA-256 hardware identity parity cases; no physical devices touched.'
+Write-Host 'PASS: 113 cases; 111 exact PowerShell identity matches and stricter Rust rejection of size 0/-1. No physical devices touched.'
 exit 0

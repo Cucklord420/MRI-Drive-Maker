@@ -54,6 +54,11 @@ jobs:
         run: |
           & ./tests/SourceSmoke.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify source and automation paths resolve to protected physical disks
+        shell: powershell
+        run: |
+          & ./tests/ProtectedPathSmoke.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify ISO mounting and the real storage backend on an owned VHD
         shell: powershell
         run: |
