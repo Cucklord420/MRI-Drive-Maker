@@ -385,7 +385,10 @@ fn archive_entries(path: &Path) -> Vec<TestEntry> {
             let mut contents = Vec::new();
             member.read_to_end(&mut contents).unwrap();
             TestEntry {
-                name: member.name().to_owned(),
+                name: member
+                    .name()
+                    .expect("generated test archive entry has a valid UTF-8 name")
+                    .into_owned(),
                 contents,
                 kind,
             }
