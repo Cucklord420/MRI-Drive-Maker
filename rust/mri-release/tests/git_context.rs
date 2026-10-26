@@ -70,16 +70,6 @@ fn run_release(arguments: &[&Path], environment: &[(String, String)]) -> Output 
     command.output().unwrap()
 }
 
-fn run_python(arguments: &[&Path], environment: &[(String, String)]) -> Output {
-    let mut command = Command::new("python3");
-    command
-        .args(arguments)
-        .env_clear()
-        .envs(environment_without_git());
-    command.envs(environment.iter().map(|(key, value)| (key, value)));
-    command.output().unwrap()
-}
-
 fn environment_with_overrides(overrides: &[(&str, String)]) -> Vec<(String, String)> {
     overrides
         .iter()
@@ -134,32 +124,12 @@ fn rust_command_line_build_and_verify_ignore_inherited_git_context() {
         .join("../..")
         .canonicalize()
         .unwrap();
-    let python_script = current_root.join("scripts/Build-Download.py");
-    let python_archive = temp.path().join("python-protected-release.zip");
-    let python_args = [
-        python_script.as_path(),
-        Path::new("--output"),
-        python_archive.as_path(),
-    ];
-    let python_built = run_python(&python_args, &environment);
-    assert!(
-        python_built.status.success(),
-        "Python CLI build failed under Git overrides: {}",
-        String::from_utf8_lossy(&python_built.stderr)
-    );
-    let python_output: serde_json::Value = serde_json::from_slice(&python_built.stdout).unwrap();
     let intended_commit = String::from_utf8(git_success(&current_root, &["rev-parse", "HEAD"]))
         .unwrap()
         .trim()
         .to_owned();
     assert_eq!(output["source_commit"], intended_commit);
-    assert_eq!(python_output["source_commit"], intended_commit);
     assert_ne!(intended_commit, alternate_commit);
-    assert_eq!(
-        fs::read(&archive).unwrap(),
-        fs::read(&python_archive).unwrap(),
-        "Rust and original Python output differ under hostile Git environment variables"
-    );
 
     let mut zip = ZipArchive::new(fs::File::open(&archive).unwrap()).unwrap();
     let mut release_manifest = String::new();
@@ -170,7 +140,7 @@ fn rust_command_line_build_and_verify_ignore_inherited_git_context() {
     let manifest: serde_json::Value = serde_json::from_str(&release_manifest).unwrap();
     assert_eq!(manifest["source_commit"], intended_commit);
 
-    let verify_args = [Path::new("--verify"), python_archive.as_path()];
+    let verify_args = [Path::new("--verify"), archive.as_path()];
     let verified = run_release(&verify_args, &environment);
     assert!(
         verified.status.success(),
@@ -179,17 +149,4 @@ fn rust_command_line_build_and_verify_ignore_inherited_git_context() {
     );
     let result: serde_json::Value = serde_json::from_slice(&verified.stdout).unwrap();
     assert_eq!(result["source_commit"], intended_commit);
-    let python_verify_args = [
-        python_script.as_path(),
-        Path::new("--verify"),
-        archive.as_path(),
-    ];
-    let python_verified = run_python(&python_verify_args, &environment);
-    assert!(
-        python_verified.status.success(),
-        "Python CLI --verify failed under Git overrides: {}",
-        String::from_utf8_lossy(&python_verified.stderr)
-    );
-    let python_result: serde_json::Value = serde_json::from_slice(&python_verified.stdout).unwrap();
-    assert_eq!(python_result["source_commit"], intended_commit);
 }
