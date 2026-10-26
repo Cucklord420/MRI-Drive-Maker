@@ -7,3 +7,4 @@
 legacy/*.txt -text -diff
 *.bundle -text -diff
 *.zip -text -diff
+START-MRI-DRIVE-MAKER.cmd -text !eol

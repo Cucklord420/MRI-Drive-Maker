@@ -19,6 +19,8 @@ The menu creates `mri-config.json`. The complete example is in `App/mri-config.e
 | `SetupArguments` / `MutableFiles` / `SetupInteractive` | Empty / empty / false. Only optional batch recipes may use these; direct-copy mode rejects them. |
 | `SerializeSetup` | True. Optional batch processes run one at a time. Copies remain parallel. |
 
+Sources on remote SMB shares remain supported when the server is verifiably remote. A share hosted by this computer is resolved to its local folder so its physical disk is protected; if the server, local share path, or a local disk's physical identity cannot be resolved safely, the build stops before any disk is changed. Archive builds protect the original ISO/ZIP and the local data tree that holds extracted cache files.
+
 A FAT32 file cannot exceed 4,294,967,295 bytes. Oversized files, insufficient free space, and any nonzero copy-worker exit are rejected; a zero exit still requires full file verification. Sources with oversized files need an appropriate official media recipe rather than an invented split operation.
 
 For advanced batch recipes, a zero exit code and completion of the normal descendant process tree are also required. A batch must target its USB working directory or an explicit supported argument; `{DriveLetter}`, `{DriveRoot}`, `{DiskNumber}`, and `{Label}` placeholders are available. Commands with shell metacharacters are rejected. The builder cannot infer the target of an arbitrary batch, detect a false internal success code, or contain work launched through services/WMI/scheduled tasks. A batch that repartitions or changes drive letters during setup is unsupported because the volume mapping guard stops it.

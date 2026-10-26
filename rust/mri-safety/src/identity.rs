@@ -29,6 +29,12 @@ pub fn key(serial:&str,pnp_id:&str,model:&str,size:i64)->Result<String,String>{
     if pnp_id.trim().is_empty() || model.trim().is_empty(){
         return Err("Incomplete USB hardware identity.".into());
     }
+    // Windows Get-Disk reports positive capacities. Reject malformed Rust
+    // input rather than allowing a nonphysical capacity to define an identity.
+    // This is intentionally stricter than the original PowerShell hash helper.
+    if size <= 0 {
+        return Err("Disk size must be positive.".into());
+    }
     let payload=format!("{}\n{}\n{}\n{}",serial.to_uppercase(),
         pnp_id.trim().to_uppercase(),model.trim().to_uppercase(),size);
     Ok(format!("{:X}",Sha256::digest(payload.as_bytes())))
@@ -54,6 +60,13 @@ mod tests{
     fn identity_fails_closed_when_pnp_or_model_missing(){
         assert!(key("A"," ","MODEL",42).is_err());
         assert!(key("A","PNP","",42).is_err());
+    }
+    #[test]
+    fn rejects_nonpositive_disk_sizes_before_hashing(){
+        for size in [0,-1,i64::MIN]{
+            assert_eq!(key("SERIAL01","USB\\VID_1234","Model",size).unwrap_err(),
+                "Disk size must be positive.");
+        }
     }
     #[test]
     fn equivalent_case_and_whitespace_are_hash_stable(){
