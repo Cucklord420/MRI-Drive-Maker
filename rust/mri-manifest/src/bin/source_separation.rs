@@ -68,10 +68,14 @@ mod tests {
         let missing_cache = tmp.path().join("missing-cache");
         // Missing cache metadata cannot cause a valid, separate source to fail.
         assert!(policy(&json!({"SourcePath":source,
-            "ApplicationPath":app,"CacheDirectory":missing_cache})).is_ok());
+            "ApplicationPath":app,"CacheDirectory":missing_cache}))
+        .is_ok());
         // A missing cache also cannot authorize a nested automation source.
-        assert!(policy(&json!({"SourcePath":app.join("cache").join("extract"),
-            "ApplicationPath":app,"CacheDirectory":missing_cache})).is_err());
+        assert!(
+            policy(&json!({"SourcePath":app.join("cache").join("extract"),
+            "ApplicationPath":app,"CacheDirectory":missing_cache}))
+            .is_err()
+        );
         assert!(policy(&json!({"SourcePath":app,"ApplicationPath":app.join("cache")})).is_err());
         assert!(
             policy(&json!({"SourcePath":app.join("cache").join("extract"),
