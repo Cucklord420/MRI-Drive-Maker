@@ -75,7 +75,7 @@ mod tests {
         assert!(module.is_file(), "original PowerShell module is missing");
         let script = r#"
 $ErrorActionPreference = 'Stop'
-Import-Module -Name $env:MRI_ORIGINAL_MODULE -Force
+Import-Module -Name $env:MRI_ORIGINAL_MODULE -Force -DisableNameChecking
 try {
     Assert-MRINotCancelled -CancelPath $env:MRI_CANCEL_PATH
     'ALLOW'
