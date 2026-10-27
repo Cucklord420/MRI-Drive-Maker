@@ -83,4 +83,67 @@ mod tests {
         assert!(fail["Ready"].as_object().unwrap().is_empty());
         assert_eq!(fail["Failed"]["disk-a"], "MRI_01");
     }
+
+    // Exercise the original exported PowerShell policy on Windows CI.
+    // All state lives in process-local hashtables; no media is accessed.
+    #[cfg(windows)]
+    #[test]
+    fn outcomes_match_original_powershell() {
+        use std::process::Command;
+
+        let module = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join("MRI.Batch.psm1");
+        assert!(module.is_file(), "original PowerShell module is missing");
+        let script = r#"
+$ErrorActionPreference = 'Stop'
+Import-Module -Name $env:MRI_ORIGINAL_MODULE -Force -DisableNameChecking
+$case = ConvertFrom-Json -InputObject $env:MRI_SCENARIO_JSON
+$ready = @{}
+$failed = @{}
+foreach ($entry in $case.Ready.PSObject.Properties) { $ready[$entry.Name] = $entry.Value }
+foreach ($entry in $case.Failed.PSObject.Properties) { $failed[$entry.Name] = $entry.Value }
+Set-MRIOutcome -Ready $ready -Failed $failed -Key ([string]$case.Key) -Label ([string]$case.Label) -Success ([bool]$case.Success)
+ConvertTo-Json -InputObject @{ Ready = $ready; Failed = $failed } -Depth 10 -Compress
+"#;
+        let cases = [
+            (
+                "new ready",
+                json!({"Ready":{},"Failed":{},"Key":"disk-a","Label":"MRI_A","Success":true}),
+            ),
+            (
+                "same-state update with case change",
+                json!({"Ready":{"disk-a":"old"},"Failed":{},"Key":"DISK-A","Label":"MRI_A","Success":true}),
+            ),
+            (
+                "failed to ready",
+                json!({"Ready":{},"Failed":{"disk-a":"bad"},"Key":"DISK-A","Label":"MRI_A","Success":true}),
+            ),
+            (
+                "ready to failed",
+                json!({"Ready":{"Disk-A":"old"},"Failed":{},"Key":"disk-a","Label":"MRI_A","Success":false}),
+            ),
+            (
+                "preserve unrelated entries",
+                json!({"Ready":{"other":"keep"},"Failed":{"disk-a":"bad"},"Key":"DISK-A","Label":"MRI_A","Success":false}),
+            ),
+        ];
+        for (name, input) in cases {
+            let rust = policy(&input).expect("Rust policy accepts fixture");
+            let output = Command::new("powershell.exe")
+                .args(["-NoProfile", "-NonInteractive", "-Command", script])
+                .env("MRI_ORIGINAL_MODULE", &module)
+                .env("MRI_SCENARIO_JSON", input.to_string())
+                .output()
+                .expect("invoke original PowerShell policy");
+            assert!(
+                output.status.success(),
+                "PowerShell case {name}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let actual: Value =
+                serde_json::from_slice(&output.stdout).expect("PowerShell JSON response");
+            assert_eq!(rust, actual, "policy mismatch: {name}");
+        }
+    }
 }
