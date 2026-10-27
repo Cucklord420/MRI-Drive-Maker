@@ -39,4 +39,4 @@ jobs:
         run: ./tests/RustManifestMatchParity.ps1
       - name: Compare 120 setup CMD argument cases with real Get-MRISetupArguments
         shell: powershell
-        run: ./tests/RustSetupArgumentsParity.ps1
+        run: powershell.exe -NoProfile -NonInteractive -File ./tests/RustSetupArgumentsParity.ps1
