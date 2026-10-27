@@ -16,24 +16,38 @@ fn policy(input: &Value) -> Result<Value, String> {
     // native CLI boundary to prevent CMD operator injection via batch path.
     let lower = folder.to_ascii_lowercase();
     if !(lower.ends_with(".bat") || lower.ends_with(".cmd"))
-        || folder.chars().any(|ch| matches!(ch, '%' | '!' | '&' | '^' | '(' | ')'))
+        || folder
+            .chars()
+            .any(|ch| matches!(ch, '%' | '!' | '&' | '^' | '(' | ')'))
     {
         return Err("Choose a .bat/.cmd path without CMD metacharacters.".into());
     }
-    if folder.trim().is_empty() || folder.starts_with('\\') || folder.contains(':')
-        || folder.chars().any(|c| c.is_control() || "*?\"<>|".contains(c)) {
+    if folder.trim().is_empty()
+        || folder.starts_with('\\')
+        || folder.contains(':')
+        || folder
+            .chars()
+            .any(|c| c.is_control() || "*?\"<>|".contains(c))
+    {
         return Err(format!("A relative file path is required: {setup}"));
     }
     for part in folder.split('\\') {
-        if part.is_empty() || part == "." || part == ".."
-            || part.ends_with(' ') || part.ends_with('.') {
+        if part.is_empty()
+            || part == "."
+            || part == ".."
+            || part.ends_with(' ')
+            || part.ends_with('.')
+        {
             return Err(format!("Unsafe relative file path: {setup}"));
         }
         let name = part.split('.').next().unwrap_or("").to_uppercase();
         let reserved = matches!(name.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CLOCK$")
             || ["COM", "LPT"].iter().any(|prefix| {
                 name.strip_prefix(*prefix).is_some_and(|suffix| {
-                    matches!(suffix, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³")
+                    matches!(
+                        suffix,
+                        "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                    )
                 })
             });
         if reserved {
@@ -117,26 +131,45 @@ mod tests {
     }
     #[test]
     fn rejects_cmd_metacharacters_in_batch_paths_before_quoting() {
-        for setup in ["setup&whoami.cmd", "setup%PATH%.cmd", "setup!.bat", "setup^.cmd",
-                      "setup(unsafe).cmd", "tools/run.exe"] {
-            assert!(policy(&json!({"Letter":"E","Number":7,"Label":"MRI_01",
-                "SetupBatch":setup,"SetupArguments":[]})).is_err(), "{setup}");
+        for setup in [
+            "setup&whoami.cmd",
+            "setup%PATH%.cmd",
+            "setup!.bat",
+            "setup^.cmd",
+            "setup(unsafe).cmd",
+            "tools/run.exe",
+        ] {
+            assert!(
+                policy(&json!({"Letter":"E","Number":7,"Label":"MRI_01",
+                "SetupBatch":setup,"SetupArguments":[]}))
+                .is_err(),
+                "{setup}"
+            );
         }
     }
 
     #[test]
     fn rejects_original_unsafe_windows_setup_components() {
         for setup in [
-            "CON.cmd", "AUX.bat", "folder/COM9.cmd", "LPT¹.cmd",
-            "folder/setup. ", "folder/bad.", "folder//setup.cmd",
-            "folder/./setup.cmd", "folder/../setup.cmd"
+            "CON.cmd",
+            "AUX.bat",
+            "folder/COM9.cmd",
+            "LPT¹.cmd",
+            "folder/setup. ",
+            "folder/bad.",
+            "folder//setup.cmd",
+            "folder/./setup.cmd",
+            "folder/../setup.cmd",
         ] {
             let fixture = json!({"Letter":"E","Number":1,"Label":"MRI_01",
                 "SetupBatch":setup,"SetupArguments":[]});
-            assert!(policy(&fixture).is_err(), "accepted original-unsafe path: {setup}");
+            assert!(
+                policy(&fixture).is_err(),
+                "accepted original-unsafe path: {setup}"
+            );
         }
         assert!(policy(&json!({"Letter":"E","Number":1,"Label":"MRI_01",
-            "SetupBatch":"tools/setup.cmd","SetupArguments":[]})).is_ok());
+            "SetupBatch":"tools/setup.cmd","SetupArguments":[]}))
+        .is_ok());
     }
-
 }
