@@ -92,7 +92,11 @@ try {
                 temp.path().join("absent").to_string_lossy().into_owned(),
                 false,
             ),
-            ("directory", temp.path().to_string_lossy().into_owned(), false),
+            (
+                "directory",
+                temp.path().to_string_lossy().into_owned(),
+                false,
+            ),
             ("existing file", marker.to_string_lossy().into_owned(), true),
             (
                 "unicode filename",
