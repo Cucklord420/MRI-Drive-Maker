@@ -35,12 +35,23 @@ fn policy(input: &Value) -> Result<Value, String> {
             map.remove(&name);
         }
     };
-    drop_key(&mut ready);
-    drop_key(&mut failed);
     if success {
-        ready.insert(key.into(), json!(label));
+        drop_key(&mut failed);
+        // PowerShell hashtables retain the spelling of an existing key.
+        let name = ready
+            .keys()
+            .find(|entry| entry.eq_ignore_ascii_case(key))
+            .cloned()
+            .unwrap_or_else(|| key.to_owned());
+        ready.insert(name, json!(label));
     } else {
-        failed.insert(key.into(), json!(label));
+        drop_key(&mut ready);
+        let name = failed
+            .keys()
+            .find(|entry| entry.eq_ignore_ascii_case(key))
+            .cloned()
+            .unwrap_or_else(|| key.to_owned());
+        failed.insert(name, json!(label));
     }
     Ok(json!({"Ready":ready,"Failed":failed}))
 }
@@ -75,7 +86,7 @@ mod tests {
         let input = json!({"Ready":{"disk-a":"old"},"Failed":{"DISK-A":"x"},
             "Key":"Disk-A","Label":"MRI_01","Success":true});
         let result = policy(&input).unwrap();
-        assert_eq!(result["Ready"]["Disk-A"], "MRI_01");
+        assert_eq!(result["Ready"]["disk-a"], "MRI_01");
         assert!(result["Failed"].as_object().unwrap().is_empty());
         let fail = policy(&json!({"Ready":result["Ready"],"Failed":result["Failed"],
             "Key":"disk-a","Label":"MRI_01","Success":false}))
