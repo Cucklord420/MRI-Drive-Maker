@@ -1,4 +1,4 @@
-# Direct PowerShell/Rust parity for Get-MRISetupArguments.
+﻿# Direct PowerShell/Rust parity for Get-MRISetupArguments.
 # Synthetic, read-only: no disks, USB inventory, mounts, or batch execution.
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
