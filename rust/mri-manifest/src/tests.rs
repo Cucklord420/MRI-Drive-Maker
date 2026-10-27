@@ -131,13 +131,15 @@ fn refuses_special_files_instead_of_attempting_to_hash_them() {
 fn windows_directory_junctions_are_refused_at_root_and_inside_source() {
     use std::process::Command;
     let tmp = tempfile::tempdir().unwrap();
-    let destination = tmp.path().join("physical");
-    let source = tmp.path().join("source");
+    let destination = tmp.path().join("physical with spaces");
+    let source = tmp.path().join("source with spaces");
     fs::create_dir(&destination).unwrap();
     fs::create_dir(&source).unwrap();
-    let junction = source.join("junction");
+    let untouched = destination.join("private fixture.bin");
+    fs::write(&untouched, b"unrelated synthetic bytes").unwrap();
+    let junction = source.join("junction with spaces");
     let status = Command::new("cmd")
-        .args(["/C", "mklink", "/J"])
+        .args(["/D", "/C", "mklink", "/J"])
         .arg(&junction)
         .arg(&destination)
         .status()
@@ -145,8 +147,20 @@ fn windows_directory_junctions_are_refused_at_root_and_inside_source() {
     assert!(status.success(), "Windows junction fixture creation failed");
     let metadata = fs::symlink_metadata(&junction).unwrap();
     assert!(has_link_or_reparse(&metadata));
-    assert!(compute(&junction, false, true).is_err());
-    assert!(compute(&source, false, true)
-        .unwrap_err()
-        .contains("Links are not allowed in media content"));
+    let root_error = compute(&junction, false, true).unwrap_err();
+    assert!(
+        root_error.contains("links or mounted-directory junctions"),
+        "{root_error}"
+    );
+    let nested_error = compute(&source, false, true).unwrap_err();
+    assert!(
+        nested_error.contains("Links are not allowed in media content"),
+        "{nested_error}"
+    );
+    let receipt_error = crate::contents::verify(&source, None).unwrap_err();
+    assert!(
+        receipt_error.contains("Links are not allowed in media content"),
+        "{receipt_error}"
+    );
+    assert_eq!(fs::read(&untouched).unwrap(), b"unrelated synthetic bytes");
 }
