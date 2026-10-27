@@ -177,7 +177,9 @@ mod tests {
                 2 => input["Config"]["SetupBatch"] = json!("prepare.cmd"),
                 3 => input["Config"]["SetupArguments"] = json!(["/quiet", "/norestart"]),
                 4 => input["Config"]["SetupInteractive"] = json!(true),
-                5 => input["Config"]["RequiredFiles"] = json!(["bootmgr", "EFI\\BOOT\\BOOTX64.EFI"]),
+                5 => {
+                    input["Config"]["RequiredFiles"] = json!(["bootmgr", "EFI\\BOOT\\BOOTX64.EFI"])
+                }
                 6 => input["Config"]["MutableFiles"] = json!(["BCD"]),
                 7 => input["Config"]["MaxParallel"] = json!(1),
                 8 => input["Config"]["RequiredFiles"] = json!(["café.txt"]),
@@ -193,7 +195,11 @@ mod tests {
             }
             let expected = powershell_oracle(&input);
             let actual = policy(&input).unwrap();
-            assert_eq!(actual.as_str(), Some(expected.as_str()), "recipe parity case {case}");
+            assert_eq!(
+                actual.as_str(),
+                Some(expected.as_str()),
+                "recipe parity case {case}"
+            );
         }
     }
 
