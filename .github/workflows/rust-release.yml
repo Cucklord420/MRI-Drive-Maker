@@ -2,6 +2,7 @@ name: Rust MRI release packaging and original-Python parity
 on:
   push:
     paths:
+      - 'rust-toolchain.toml'
       - 'rust/mri-release/**'
       - 'scripts/Build-Download.py'
       - 'tests/PackageSmoke.ps1'
@@ -11,6 +12,11 @@ on:
 
 permissions:
   contents: read
+
+# Cancel superseded runs per event; keep push and pull_request checks independent.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}-${{ (github.event_name == 'workflow_dispatch' || github.run_attempt != '1') && github.run_id || 'automatic' }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' && github.run_attempt == '1' }}
 
 jobs:
   rust-release-parity:

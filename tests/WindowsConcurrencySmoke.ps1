@@ -51,7 +51,7 @@ try {
 $script:OwnedFixtures=@(Read-MRIJson (Join-Path $PSScriptRoot 'fixtures.json'))
 function Get-MRIInventory { foreach ($fixture in $script:OwnedFixtures) { $fixture.Drive } }
 function Get-MRIWritableDisk {
-    param($Record,$Config,[string[]]$ProtectedKeys,[int]$ExpectedNumber,[string]$CancelPath)
+    param($Record,$Config,[string[]]$ProtectedKeys,[int]$ExpectedNumber,[string]$CancelPath,[string[]]$ProtectedPaths=@())
     Assert-MRINotCancelled $CancelPath
     [void](Assert-MRIDrive $Record $Config $ProtectedKeys $ExpectedNumber)
     $matched=@($script:OwnedFixtures | Where-Object { $_.Record.Key -eq $Record.Key })
