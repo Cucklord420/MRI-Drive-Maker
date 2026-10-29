@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap};
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use zip::{write::SimpleFileOptions, CompressionMethod, DateTime, ZipArchive, ZipWriter};
@@ -318,6 +318,124 @@ const DEFAULT_RESOURCE_LIMITS: ResourceLimits = ResourceLimits {
 
 const ZIP_STREAM_BUFFER_BYTES: usize = 64 * 1024;
 
+fn read_exact_at<R: Read + Seek>(
+    reader: &mut R,
+    offset: u64,
+    buffer: &mut [u8],
+) -> std::io::Result<()> {
+    reader.seek(SeekFrom::Start(offset))?;
+    reader.read_exact(buffer)
+}
+
+fn zip64_entry_count<R: Read + Seek>(reader: &mut R, eocd_offset: u64) -> Option<u64> {
+    const LOCATOR_BYTES: u64 = 20;
+    const ZIP64_EOCD_FIXED_BYTES: u64 = 56;
+    let locator_offset = eocd_offset.checked_sub(LOCATOR_BYTES)?;
+    let mut locator = [0_u8; LOCATOR_BYTES as usize];
+    read_exact_at(reader, locator_offset, &mut locator).ok()?;
+    if locator[..4] != *b"PK\x06\x07" {
+        return None;
+    }
+
+    let zip64_offset = u64::from_le_bytes(locator[8..16].try_into().ok()?);
+    let mut zip64_eocd = [0_u8; ZIP64_EOCD_FIXED_BYTES as usize];
+    read_exact_at(reader, zip64_offset, &mut zip64_eocd).ok()?;
+    if zip64_eocd[..4] != *b"PK\x06\x06" {
+        return None;
+    }
+    let record_size = u64::from_le_bytes(zip64_eocd[4..12].try_into().ok()?);
+    if record_size < 44 || zip64_offset.checked_add(12)?.checked_add(record_size)? > locator_offset
+    {
+        return None;
+    }
+
+    let entries_on_disk = u64::from_le_bytes(zip64_eocd[24..32].try_into().ok()?);
+    let entries_total = u64::from_le_bytes(zip64_eocd[32..40].try_into().ok()?);
+    Some(entries_on_disk.max(entries_total))
+}
+
+fn preflight_zip_entry_count<R: Read + Seek>(
+    reader: &mut R,
+    archive_bytes: u64,
+    max_entries: usize,
+) -> Result<(), String> {
+    const EOCD_FIXED_BYTES: usize = 22;
+    const MAX_COMMENT_BYTES: u64 = u16::MAX as u64;
+    const EOCD_SIG: &[u8; 4] = b"PK\x05\x06";
+    const EOCD_TAIL_BYTES: u64 = EOCD_FIXED_BYTES as u64 + MAX_COMMENT_BYTES;
+
+    if archive_bytes < EOCD_FIXED_BYTES as u64 {
+        return Err("ZIP lacks an end-of-central-directory record".into());
+    }
+    let tail_len = usize::try_from(archive_bytes.min(EOCD_TAIL_BYTES))
+        .map_err(|_| "ZIP end-record window does not fit in memory")?;
+    let tail_offset = archive_bytes - tail_len as u64;
+    let mut tail = Vec::new();
+    tail.try_reserve_exact(tail_len)
+        .map_err(|error| format!("Cannot reserve ZIP end-record window: {error}"))?;
+    tail.resize(tail_len, 0);
+    read_exact_at(reader, tail_offset, &mut tail).map_err(|error| error.to_string())?;
+
+    let mut found_eocd = false;
+    for position in (0..=tail_len - EOCD_FIXED_BYTES).rev() {
+        if tail.get(position..position + 4) != Some(EOCD_SIG) {
+            continue;
+        }
+        let comment_len = u16::from_le_bytes([tail[position + 20], tail[position + 21]]) as usize;
+        if position + EOCD_FIXED_BYTES + comment_len > tail_len {
+            continue;
+        }
+
+        let entries_on_disk = u16::from_le_bytes([tail[position + 8], tail[position + 9]]) as u64;
+        let entries_total = u16::from_le_bytes([tail[position + 10], tail[position + 11]]) as u64;
+        let directory_size = u32::from_le_bytes([
+            tail[position + 12],
+            tail[position + 13],
+            tail[position + 14],
+            tail[position + 15],
+        ]) as u64;
+        let directory_offset = u32::from_le_bytes([
+            tail[position + 16],
+            tail[position + 17],
+            tail[position + 18],
+            tail[position + 19],
+        ]) as u64;
+        let zip64 = entries_on_disk == u16::MAX as u64
+            || entries_total == u16::MAX as u64
+            || directory_size == u32::MAX as u64
+            || directory_offset == u32::MAX as u64;
+        let declared_entries = if zip64 {
+            let eocd_offset = tail_offset + position as u64;
+            let Some(zip64_entries) = zip64_entry_count(reader, eocd_offset) else {
+                continue;
+            };
+            zip64_entries
+                .max(if entries_on_disk == u16::MAX as u64 {
+                    0
+                } else {
+                    entries_on_disk
+                })
+                .max(if entries_total == u16::MAX as u64 {
+                    0
+                } else {
+                    entries_total
+                })
+        } else {
+            entries_on_disk.max(entries_total)
+        };
+        found_eocd = true;
+        if declared_entries > max_entries as u64 {
+            return Err(format!("ZIP entry count exceeds {max_entries}"));
+        }
+    }
+
+    if found_eocd {
+        Ok(())
+    } else {
+        Err("ZIP lacks a valid end-of-central-directory record".into())
+    }
+}
+
 #[derive(Debug)]
 struct VerifiedMember {
     expanded_bytes: u64,
@@ -415,11 +533,12 @@ fn verify_with_limits(
     limits: ResourceLimits,
 ) -> Result<Manifest, String> {
     assert_git_identity(repo, environment)?;
-    let file = File::open(archive_path).map_err(|e| e.to_string())?;
+    let mut file = File::open(archive_path).map_err(|e| e.to_string())?;
     let archive_bytes = file.metadata().map_err(|e| e.to_string())?.len();
     if archive_bytes > limits.max_archive_bytes {
         return Err("ZIP archive exceeds the compressed-input-size limit".into());
     }
+    preflight_zip_entry_count(&mut file, archive_bytes, limits.max_entries)?;
     let mut zip = ZipArchive::new(file).map_err(|e| e.to_string())?;
     if zip.len() > limits.max_entries {
         return Err(format!("ZIP entry count exceeds {}", limits.max_entries));

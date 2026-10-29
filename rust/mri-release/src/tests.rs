@@ -1109,6 +1109,58 @@ fn rust_rejects_archives_over_the_entry_count_limit() {
 }
 
 #[test]
+fn rust_rejects_declared_entry_count_before_parsing_the_central_directory() {
+    let temp = tempfile::tempdir().unwrap();
+    let archive = temp.path().join("oversized-declared-entry-count.zip");
+    write_test_archive(&archive, &[]);
+    let mut bytes = fs::read(&archive).unwrap();
+    let eocd = bytes.len() - 22;
+    bytes[eocd + 8..eocd + 10].copy_from_slice(&5_u16.to_le_bytes());
+    bytes[eocd + 10..eocd + 12].copy_from_slice(&5_u16.to_le_bytes());
+    fs::write(&archive, bytes).unwrap();
+
+    let limits = ResourceLimits {
+        max_entries: 4,
+        ..DEFAULT_RESOURCE_LIMITS
+    };
+    let error = verify_with_limits(&repo_root(), &archive, &process_environment(), limits)
+        .expect_err("declared entry count must be rejected before central-directory parsing");
+    assert!(error.contains("ZIP entry count exceeds 4"), "{error}");
+}
+
+#[test]
+fn zip64_entry_count_is_checked_before_archive_construction() {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"PK\x06\x06");
+    bytes.extend_from_slice(&44_u64.to_le_bytes());
+    bytes.extend_from_slice(&45_u16.to_le_bytes());
+    bytes.extend_from_slice(&45_u16.to_le_bytes());
+    bytes.extend_from_slice(&0_u32.to_le_bytes());
+    bytes.extend_from_slice(&0_u32.to_le_bytes());
+    bytes.extend_from_slice(&5_u64.to_le_bytes());
+    bytes.extend_from_slice(&5_u64.to_le_bytes());
+    bytes.extend_from_slice(&0_u64.to_le_bytes());
+    bytes.extend_from_slice(&0_u64.to_le_bytes());
+    bytes.extend_from_slice(b"PK\x06\x07");
+    bytes.extend_from_slice(&0_u32.to_le_bytes());
+    bytes.extend_from_slice(&0_u64.to_le_bytes());
+    bytes.extend_from_slice(&1_u32.to_le_bytes());
+    bytes.extend_from_slice(b"PK\x05\x06");
+    bytes.extend_from_slice(&0_u16.to_le_bytes());
+    bytes.extend_from_slice(&0_u16.to_le_bytes());
+    bytes.extend_from_slice(&u16::MAX.to_le_bytes());
+    bytes.extend_from_slice(&u16::MAX.to_le_bytes());
+    bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+    bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+    bytes.extend_from_slice(&0_u16.to_le_bytes());
+
+    let mut archive = Cursor::new(bytes);
+    let error = preflight_zip_entry_count(&mut archive, 98, 4)
+        .expect_err("ZIP64 entry count must be rejected before archive construction");
+    assert!(error.contains("ZIP entry count exceeds 4"), "{error}");
+}
+
+#[test]
 fn rust_rejects_oversized_compressed_input_before_zip_parsing() {
     let temp = tempfile::tempdir().unwrap();
     let archive = temp.path().join("oversized-input.zip");
