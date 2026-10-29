@@ -1,6 +1,6 @@
 use super::*;
 use std::ffi::OsString;
-use std::io::Cursor;
+use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::process::Command;
 
 fn test_environment(overrides: &[(&str, String)]) -> Vec<(OsString, OsString)> {
@@ -444,6 +444,50 @@ fn prepend_zip_prefix_and_upgrade_to_zip64(zip32: &[u8]) -> Vec<u8> {
     let mut prefixed = b"synthetic ZIP prefix".to_vec();
     prefixed.extend_from_slice(&archive);
     prefixed
+}
+
+fn add_zip64_extensible_decoy(zip64: &mut Vec<u8>, decoy_entries: u64) {
+    let locator = zip64
+        .windows(4)
+        .rposition(|window| window == b"PK\x06\x07")
+        .expect("ZIP64 locator");
+    let record = locator.checked_sub(56).expect("fixed ZIP64 record");
+    assert_eq!(&zip64[record..record + 4], b"PK\x06\x06");
+
+    let extension = vec![0_u8; 160];
+    zip64.splice(locator..locator, extension.iter().copied());
+    let new_locator = locator + extension.len();
+    zip64[record + 4..record + 12]
+        .copy_from_slice(&(44_u64 + extension.len() as u64).to_le_bytes());
+
+    let decoy = record + 56 + 8;
+    assert!(decoy + 56 <= new_locator);
+    let decoy_record_size = (new_locator - decoy - 12) as u64;
+    zip64[decoy..decoy + 4].copy_from_slice(b"PK\x06\x06");
+    zip64[decoy + 4..decoy + 12].copy_from_slice(&decoy_record_size.to_le_bytes());
+    zip64[decoy + 12..decoy + 24].copy_from_slice(&zip64[record + 12..record + 24].to_vec());
+    zip64[decoy + 24..decoy + 32].copy_from_slice(&decoy_entries.to_le_bytes());
+    zip64[decoy + 32..decoy + 40].copy_from_slice(&decoy_entries.to_le_bytes());
+    zip64[decoy + 40..decoy + 56].copy_from_slice(&zip64[record + 40..record + 56].to_vec());
+}
+
+struct ByteCountingReader<R> {
+    inner: R,
+    bytes_read: u64,
+}
+
+impl<R: Read> Read for ByteCountingReader<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let read = self.inner.read(buffer)?;
+        self.bytes_read += read as u64;
+        Ok(read)
+    }
+}
+
+impl<R: Seek> Seek for ByteCountingReader<R> {
+    fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(position)
+    }
 }
 
 fn write_repetitive_deflated_archive(path: &Path, entries: &[(String, u64)]) {
@@ -1191,6 +1235,107 @@ fn zip64_entry_count_preflight_supports_prepended_archives() {
     let error = preflight_zip_entry_count(&mut archive, archive_len, 4)
         .expect_err("ZIP64 entry count must be rejected before archive construction");
     assert!(error.contains("ZIP entry count exceeds 4"), "{error}");
+}
+
+#[test]
+fn zip32_entry_count_preflight_rejects_an_underreported_directory() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("underreported-entry-count.zip");
+    let entries = (0..5)
+        .map(|index| TestEntry {
+            name: format!("MRI-Drive-Maker-v0.3.0/App/empty-{index}.txt"),
+            contents: Vec::new(),
+            kind: TestEntryKind::File,
+        })
+        .collect::<Vec<_>>();
+    write_test_archive(&path, &entries);
+    let mut bytes = fs::read(path).unwrap();
+    let eocd = bytes.len() - 22;
+    bytes[eocd + 8..eocd + 10].copy_from_slice(&1_u16.to_le_bytes());
+    bytes[eocd + 10..eocd + 12].copy_from_slice(&1_u16.to_le_bytes());
+
+    let archive_len = bytes.len() as u64;
+    let mut archive = Cursor::new(bytes);
+    let error = preflight_zip_entry_count(&mut archive, archive_len, 4)
+        .expect_err("all central-directory entries must be counted before ZIP parsing");
+    assert!(
+        error.contains("ZIP entry count exceeds 4"),
+        "underreported archive was not rejected as over limit: {error}"
+    );
+}
+
+#[test]
+fn zip64_prefix_preflight_uses_the_same_record_as_zip_rs() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("ordinary.zip");
+    let entries = (0..5)
+        .map(|index| TestEntry {
+            name: format!("MRI-Drive-Maker-v0.3.0/App/empty-{index}.txt"),
+            contents: Vec::new(),
+            kind: TestEntryKind::File,
+        })
+        .collect::<Vec<_>>();
+    write_test_archive(&path, &entries);
+    let mut bytes = prepend_zip_prefix_and_upgrade_to_zip64(&fs::read(path).unwrap());
+    add_zip64_extensible_decoy(&mut bytes, 1);
+
+    let parsed = ZipArchive::new(Cursor::new(bytes.clone())).unwrap();
+    assert_eq!(parsed.len(), 5, "fixture must use the real ZIP64 record");
+
+    let archive_len = bytes.len() as u64;
+    let mut archive = Cursor::new(bytes);
+    let error = preflight_zip_entry_count(&mut archive, archive_len, 4)
+        .expect_err("preflight must reject the real record's over-limit count");
+    assert!(error.contains("ZIP entry count exceeds 4"), "{error}");
+}
+
+#[test]
+fn zip64_candidate_scanning_has_a_bounded_total_read_budget() {
+    const DECOY_COUNT: usize = 100;
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("base.zip");
+    write_test_archive(
+        &path,
+        &[TestEntry {
+            name: "MRI-Drive-Maker-v0.3.0/App/one.txt".into(),
+            contents: b"one".to_vec(),
+            kind: TestEntryKind::File,
+        }],
+    );
+    let mut bytes = fs::read(path).unwrap();
+    let eocd = bytes.len() - 22;
+    let mut decoys = Vec::with_capacity(DECOY_COUNT * 42);
+    for _ in 0..DECOY_COUNT {
+        decoys.extend_from_slice(b"PK\x06\x07");
+        decoys.extend_from_slice(&0_u32.to_le_bytes());
+        decoys.extend_from_slice(&u64::MAX.to_le_bytes());
+        decoys.extend_from_slice(&1_u32.to_le_bytes());
+        decoys.extend_from_slice(b"PK\x05\x06");
+        decoys.extend_from_slice(&0_u16.to_le_bytes());
+        decoys.extend_from_slice(&0_u16.to_le_bytes());
+        decoys.extend_from_slice(&u16::MAX.to_le_bytes());
+        decoys.extend_from_slice(&u16::MAX.to_le_bytes());
+        decoys.extend_from_slice(&0_u32.to_le_bytes());
+        decoys.extend_from_slice(&0_u32.to_le_bytes());
+        decoys.extend_from_slice(&0_u16.to_le_bytes());
+    }
+    assert!(decoys.len() <= u16::MAX as usize);
+    bytes[eocd + 20..eocd + 22].copy_from_slice(&(decoys.len() as u16).to_le_bytes());
+    bytes.extend_from_slice(&decoys);
+
+    let archive_len = bytes.len() as u64;
+    let mut archive = ByteCountingReader {
+        inner: Cursor::new(bytes),
+        bytes_read: 0,
+    };
+    let error = preflight_zip_entry_count(&mut archive, archive_len, 4)
+        .expect_err("many ZIP64 decoys must exhaust the bounded preflight budget");
+    assert!(error.contains("bounded"), "unexpected error: {error}");
+    assert!(
+        archive.bytes_read <= archive_len.saturating_mul(3),
+        "preflight read {} bytes for a {archive_len}-byte archive",
+        archive.bytes_read
+    );
 }
 
 #[test]
