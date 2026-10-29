@@ -721,6 +721,37 @@ fn never_overwrites_candidate_or_accepts_untrusted_revision() {
     assert!(!path.exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn published_archive_preserves_umask_filtered_create_new_mode() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    let output_dir = temp.path().join("output");
+    fs::create_dir_all(&output_dir).unwrap();
+    let environment = test_environment(&[]);
+    synthetic_repository(
+        &repo,
+        "synthetic source bytes\n",
+        "@echo synthetic\r\n",
+        &environment,
+    );
+
+    let ordinary_file = output_dir.join("ordinary-file");
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&ordinary_file)
+        .unwrap();
+    let expected_mode = fs::metadata(&ordinary_file).unwrap().permissions().mode() & 0o777;
+
+    let archive = output_dir.join("release.zip");
+    build_with_environment(&repo, &archive, "0.3.0", &synthetic_sources(), &environment).unwrap();
+    let actual_mode = fs::metadata(&archive).unwrap().permissions().mode() & 0o777;
+    assert_eq!(actual_mode, expected_mode);
+}
+
 fn assert_failed_archive_stage_cleans_output_and_allows_retry(stage: &str) {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
