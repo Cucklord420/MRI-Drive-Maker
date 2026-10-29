@@ -2,6 +2,7 @@ name: Rust USB selection safety (offline parity)
 on:
   push:
     paths:
+      - 'rust-toolchain.toml'
       - 'rust/mri-safety/**'
       - 'MRI.Batch.psm1'
       - 'tests/RustSelectionParity.ps1'

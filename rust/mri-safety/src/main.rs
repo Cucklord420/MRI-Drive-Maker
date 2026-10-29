@@ -72,6 +72,13 @@ fn block_reason<'a>(disk: &'a Disk, request: &'a Request) -> Option<String> {
 }
 
 fn select(request: &Request) -> Result<Vec<i32>, String> {
+    // The original PowerShell entry point calls Assert-MRIConfig before selection.
+    // A direct JSON invocation must not bypass those capacity preconditions.
+    if request.minimum_disk_bytes < 1
+        || request.maximum_disk_bytes < request.minimum_disk_bytes
+    {
+        return Err("Invalid capacity limits.".into());
+    }
     if request.selection.trim().is_empty() {
         return Ok(Vec::new());
     }
@@ -241,6 +248,40 @@ mod tests {
         duplicate.inventory.push(disk(6, "OTHER"));
         assert!(respond(&duplicate).error.is_some());
     }
+    #[test]
+    fn malformed_capacity_limits_never_approve_a_selection() {
+        for (minimum, maximum) in [
+            (0, 64_000_000_000),
+            (-1, 64_000_000_000),
+            (64_000_000_001, 64_000_000_000),
+        ] {
+            let mut q = request("6");
+            q.minimum_disk_bytes = minimum;
+            q.maximum_disk_bytes = maximum;
+            let result = respond(&q);
+            assert_eq!(result.error.as_deref(), Some("Invalid capacity limits."));
+            assert!(result.selected.is_empty());
+            assert!(result.confirmation.is_none());
+        }
+    }
+
+    #[test]
+    fn equal_positive_capacity_limits_remain_accepted() {
+        let mut q = request("6");
+        q.minimum_disk_bytes = 32_000_000_000;
+        q.maximum_disk_bytes = 32_000_000_000;
+        assert_eq!(respond(&q).selected, vec![6]);
+    }
+
+    #[test]
+    fn invalid_limits_reject_even_empty_selection() {
+        let mut q = request("");
+        q.minimum_disk_bytes = 0;
+        let result = respond(&q);
+        assert_eq!(result.error.as_deref(), Some("Invalid capacity limits."));
+        assert!(result.selected.is_empty());
+    }
+
     #[test]
     fn hundred_deterministic_variations_have_strict_approval() {
         for i in 0..100 {
