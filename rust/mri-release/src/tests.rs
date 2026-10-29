@@ -663,7 +663,7 @@ fn assert_rust_rejects(repo: &Path, archive: &Path, expected: Option<&str>) {
     }
 }
 
-type ReleaseMembers = IndexMap<String, (Vec<u8>, (u16, u8, u8, u8, u8, u8))>;
+type ReleaseMembers = IndexMap<String, (Vec<u8>, (u16, u8, u8, u8, u8, u8), Option<u32>)>;
 
 fn members(path: &Path) -> ReleaseMembers {
     let mut zip = ZipArchive::new(File::open(path).unwrap()).unwrap();
@@ -681,11 +681,12 @@ fn members(path: &Path) -> ReleaseMembers {
             date.minute(),
             date.second(),
         );
+        let mode = member.unix_mode();
         let name = member.name().unwrap().into_owned();
         let mut bytes = Vec::new();
         member.read_to_end(&mut bytes).unwrap();
         assert_eq!(member.compression(), CompressionMethod::Stored);
-        result.insert(name, (bytes, meta));
+        result.insert(name, (bytes, meta, mode));
     }
     result
 }
@@ -707,6 +708,16 @@ fn package_contains_one_launcher_and_approved_source_files_only() {
         .sha256
         .keys()
         .any(|name| name.starts_with("legacy/") || name.starts_with("Developer/")));
+
+    let package = members(&path);
+    let names: Vec<_> = package.keys().cloned().collect();
+    let mut sorted_names = names.clone();
+    sorted_names.sort();
+    assert_eq!(names, sorted_names, "ZIP entries must remain sorted");
+    assert!(
+        package.values().all(|(_, _, mode)| *mode == Some(0o100644)),
+        "all release ZIP members must retain regular-file mode 0644"
+    );
 }
 
 #[test]

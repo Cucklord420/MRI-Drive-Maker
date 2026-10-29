@@ -493,6 +493,20 @@ fn normalize_zip_creator_version(path: &Path) -> Result<(), String> {
     output.flush().map_err(|e| e.to_string())
 }
 
+#[cfg(unix)]
+fn create_staged_archive(parent: &Path) -> Result<tempfile::NamedTempFile, String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut builder = tempfile::Builder::new();
+    builder.permissions(fs::Permissions::from_mode(0o666));
+    builder.tempfile_in(parent).map_err(|e| e.to_string())
+}
+
+#[cfg(not(unix))]
+fn create_staged_archive(parent: &Path) -> Result<tempfile::NamedTempFile, String> {
+    tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())
+}
+
 fn publish_archive<W, N, V>(
     destination: &Path,
     write_archive: W,
@@ -510,7 +524,7 @@ where
         .unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
 
-    let mut staged = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+    let mut staged = create_staged_archive(parent)?;
     #[cfg(test)]
     record_staged_path(staged.path());
 
