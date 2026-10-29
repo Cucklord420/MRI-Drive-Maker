@@ -463,12 +463,14 @@ fn add_zip64_extensible_decoy(zip64: &mut Vec<u8>, decoy_entries: u64) {
     let decoy = record + 56 + 8;
     assert!(decoy + 56 <= new_locator);
     let decoy_record_size = (new_locator - decoy - 12) as u64;
+    let record_disk_fields = zip64[record + 12..record + 24].to_vec();
+    let record_directory_fields = zip64[record + 40..record + 56].to_vec();
     zip64[decoy..decoy + 4].copy_from_slice(b"PK\x06\x06");
     zip64[decoy + 4..decoy + 12].copy_from_slice(&decoy_record_size.to_le_bytes());
-    zip64[decoy + 12..decoy + 24].copy_from_slice(&zip64[record + 12..record + 24].to_vec());
+    zip64[decoy + 12..decoy + 24].copy_from_slice(&record_disk_fields);
     zip64[decoy + 24..decoy + 32].copy_from_slice(&decoy_entries.to_le_bytes());
     zip64[decoy + 32..decoy + 40].copy_from_slice(&decoy_entries.to_le_bytes());
-    zip64[decoy + 40..decoy + 56].copy_from_slice(&zip64[record + 40..record + 56].to_vec());
+    zip64[decoy + 40..decoy + 56].copy_from_slice(&record_directory_fields);
 }
 
 struct ByteCountingReader<R> {
