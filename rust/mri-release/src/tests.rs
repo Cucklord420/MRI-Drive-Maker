@@ -1,5 +1,6 @@
 use super::*;
 use std::ffi::OsString;
+use std::io::Cursor;
 use std::process::Command;
 
 fn test_environment(overrides: &[(&str, String)]) -> Vec<(OsString, OsString)> {
@@ -404,6 +405,26 @@ fn write_test_archive(path: &Path, entries: &[TestEntry]) {
                     .add_symlink(entry.name.as_str(), target, options)
                     .unwrap();
             }
+        }
+    }
+    archive.finish().unwrap();
+}
+
+fn write_repetitive_deflated_archive(path: &Path, entries: &[(String, u64)]) {
+    let date = DateTime::from_date_and_time(2000, 1, 1, 0, 0, 0).unwrap();
+    let options = SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Deflated)
+        .last_modified_time(date)
+        .unix_permissions(0o644);
+    let mut archive = ZipWriter::new(File::create(path).unwrap());
+    let block = [b'A'; 64 * 1024];
+    for (name, size) in entries {
+        archive.start_file(name, options).unwrap();
+        let mut remaining = *size;
+        while remaining != 0 {
+            let count = remaining.min(block.len() as u64) as usize;
+            archive.write_all(&block[..count]).unwrap();
+            remaining -= count as u64;
         }
     }
     archive.finish().unwrap();
@@ -1007,4 +1028,183 @@ fn rust_rejects_windows_archive_aliases_and_unsafe_types() {
         make_adversarial_archive(&repo_root(), &valid, &archive, case);
         assert_rust_rejects(&repo_root(), &archive, expected);
     }
+}
+
+#[test]
+fn rust_rejects_a_high_ratio_member_over_the_expansion_limit() {
+    const MEMBER_LIMIT: u64 = 16 * 1024 * 1024;
+
+    let temp = tempfile::tempdir().unwrap();
+    let archive = temp.path().join("high-ratio.zip");
+    write_repetitive_deflated_archive(
+        &archive,
+        &[(
+            "MRI-Drive-Maker-v0.3.0/App/compressible.bin".into(),
+            MEMBER_LIMIT + 1,
+        )],
+    );
+
+    let mut zip = ZipArchive::new(File::open(&archive).unwrap()).unwrap();
+    let member = zip.by_index(0).unwrap();
+    assert!(member.compressed_size() * 100 < member.size());
+
+    assert_rust_rejects(
+        &repo_root(),
+        &archive,
+        Some("ZIP member exceeds the per-member expanded-size limit"),
+    );
+}
+
+#[test]
+fn rust_rejects_a_manifest_over_its_retained_memory_limit() {
+    const MANIFEST_LIMIT: u64 = 1024 * 1024;
+
+    let temp = tempfile::tempdir().unwrap();
+    let archive = temp.path().join("oversized-manifest.zip");
+    write_repetitive_deflated_archive(
+        &archive,
+        &[(
+            "MRI-Drive-Maker-v0.3.0/RELEASE.json".into(),
+            MANIFEST_LIMIT + 1,
+        )],
+    );
+
+    assert_rust_rejects(
+        &repo_root(),
+        &archive,
+        Some("RELEASE.json exceeds the manifest-size limit"),
+    );
+}
+
+#[test]
+fn rust_rejects_aggregate_expansion_before_reading_payloads() {
+    const MEMBER_LIMIT: u64 = 16 * 1024 * 1024;
+
+    let temp = tempfile::tempdir().unwrap();
+    let archive = temp.path().join("aggregate-limit.zip");
+    let root = "MRI-Drive-Maker-v0.3.0";
+    let mut entries = (0..4)
+        .map(|index| (format!("{root}/App/member-{index}.bin"), MEMBER_LIMIT))
+        .collect::<Vec<_>>();
+    entries.push((format!("{root}/RELEASE.json"), 1));
+    write_repetitive_deflated_archive(&archive, &entries);
+
+    assert_rust_rejects(
+        &repo_root(),
+        &archive,
+        Some("ZIP exceeds the aggregate expanded-size limit"),
+    );
+}
+
+#[test]
+fn rust_rejects_archives_over_the_entry_count_limit() {
+    let temp = tempfile::tempdir().unwrap();
+    let archive = temp.path().join("too-many-entries.zip");
+    let entries = (0..=4096)
+        .map(|index| (format!("MRI-Drive-Maker-v0.3.0/App/empty-{index}.txt"), 0))
+        .collect::<Vec<_>>();
+    write_repetitive_deflated_archive(&archive, &entries);
+
+    assert_rust_rejects(&repo_root(), &archive, Some("ZIP entry count exceeds 4096"));
+}
+
+#[test]
+fn rust_rejects_oversized_compressed_input_before_zip_parsing() {
+    let temp = tempfile::tempdir().unwrap();
+    let archive = temp.path().join("oversized-input.zip");
+    fs::write(&archive, b"oversized input fixture").unwrap();
+    let limits = ResourceLimits {
+        max_archive_bytes: 8,
+        ..DEFAULT_RESOURCE_LIMITS
+    };
+
+    let error = verify_with_limits(&repo_root(), &archive, &process_environment(), limits)
+        .expect_err("oversized compressed input should be rejected before ZIP parsing");
+    assert!(error.contains("ZIP archive exceeds the compressed-input-size limit"));
+}
+
+#[test]
+fn streaming_enforces_actual_member_and_aggregate_expansion_limits() {
+    let limits = ResourceLimits {
+        max_archive_bytes: 1024,
+        max_entries: 4,
+        max_member_bytes: 4,
+        max_total_bytes: 6,
+        max_manifest_bytes: 4,
+    };
+    let mut actual_total = 0;
+
+    let mut too_large_member = Cursor::new(b"12345".to_vec());
+    let error = stream_member(
+        &mut too_large_member,
+        "member.bin",
+        3,
+        false,
+        &mut actual_total,
+        limits,
+    )
+    .expect_err("actual member output should be bounded even when its declaration is smaller");
+    assert!(error.contains("ZIP member exceeds the per-member expanded-size limit"));
+
+    let mut first_member = Cursor::new(b"123".to_vec());
+    stream_member(
+        &mut first_member,
+        "first.bin",
+        3,
+        false,
+        &mut actual_total,
+        limits,
+    )
+    .unwrap();
+    let mut second_member = Cursor::new(b"4567".to_vec());
+    let error = stream_member(
+        &mut second_member,
+        "second.bin",
+        4,
+        false,
+        &mut actual_total,
+        limits,
+    )
+    .expect_err("actual aggregate output should stop at the configured total");
+    assert!(error.contains("ZIP exceeds the aggregate expanded-size limit"));
+}
+
+#[test]
+fn oversized_release_member_cleans_the_staged_archive() {
+    const MEMBER_LIMIT: usize = 16 * 1024 * 1024;
+
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    let output_dir = temp.path().join("output");
+    fs::create_dir_all(&output_dir).unwrap();
+    let archive = output_dir.join("release.zip");
+    let environment = test_environment(&[]);
+    let oversized_source = "A".repeat(MEMBER_LIMIT + 1);
+    synthetic_repository(
+        &repo,
+        &oversized_source,
+        "@echo synthetic\r\n",
+        &environment,
+    );
+
+    let error =
+        build_with_environment(&repo, &archive, "0.3.0", &synthetic_sources(), &environment)
+            .expect_err("a release with an oversized committed source should fail verification");
+    assert!(error.contains("ZIP member exceeds the per-member expanded-size limit"));
+    assert!(
+        !archive.exists(),
+        "failed verification left the final archive"
+    );
+    assert_eq!(
+        fs::read_dir(&output_dir).unwrap().count(),
+        0,
+        "failed verification left a staged archive"
+    );
+}
+
+#[test]
+fn published_source_archive_is_accepted_by_the_rust_verifier() {
+    let repo = repo_root();
+    let archive = repo.join("downloads/MRI-Drive-Maker-v0.3.0.zip");
+    verify(&repo, &archive).expect("published source ZIP should remain within verifier limits");
 }

@@ -210,6 +210,24 @@ fn committed_with_environment(
 ) -> Result<Vec<u8>, String> {
     git_with_environment(repo, &["show", &format!("{revision}:{path}")], environment)
 }
+fn committed_size_with_environment(
+    repo: &Path,
+    revision: &str,
+    path: &str,
+    environment: &[(OsString, OsString)],
+) -> Result<u64, String> {
+    let output = git_with_environment(
+        repo,
+        &["cat-file", "-s", &format!("{revision}:{path}")],
+        environment,
+    )?;
+    let size = std::str::from_utf8(&output)
+        .map_err(|_| "Git returned a non-UTF-8 source size")?
+        .trim()
+        .parse::<u64>()
+        .map_err(|_| "Git returned an invalid source size")?;
+    Ok(size)
+}
 fn manifest_name(source: &str, prefix: &str) -> String {
     format!("{prefix}{source}")
 }
@@ -280,14 +298,132 @@ fn canonical_member_name(name: &str) -> Result<(String, String), String> {
 fn verify(repo: &Path, archive_path: &Path) -> Result<Manifest, String> {
     verify_with_environment(repo, archive_path, &process_environment())
 }
+
+#[derive(Clone, Copy)]
+struct ResourceLimits {
+    max_archive_bytes: u64,
+    max_entries: usize,
+    max_member_bytes: u64,
+    max_total_bytes: u64,
+    max_manifest_bytes: u64,
+}
+
+const DEFAULT_RESOURCE_LIMITS: ResourceLimits = ResourceLimits {
+    max_archive_bytes: 128 * 1024 * 1024,
+    max_entries: 4096,
+    max_member_bytes: 16 * 1024 * 1024,
+    max_total_bytes: 64 * 1024 * 1024,
+    max_manifest_bytes: 1024 * 1024,
+};
+
+const ZIP_STREAM_BUFFER_BYTES: usize = 64 * 1024;
+
+#[derive(Debug)]
+struct VerifiedMember {
+    expanded_bytes: u64,
+    sha256: String,
+}
+
+fn stream_member<R: Read>(
+    reader: &mut R,
+    name: &str,
+    declared_size: u64,
+    retain_contents: bool,
+    total_expanded: &mut u64,
+    limits: ResourceLimits,
+) -> Result<(VerifiedMember, Option<Vec<u8>>), String> {
+    if declared_size > limits.max_member_bytes {
+        return Err(format!(
+            "ZIP member exceeds the per-member expanded-size limit: {name}"
+        ));
+    }
+    if retain_contents && declared_size > limits.max_manifest_bytes {
+        return Err("RELEASE.json exceeds the manifest-size limit".into());
+    }
+
+    let mut contents = if retain_contents {
+        let capacity = usize::try_from(declared_size)
+            .map_err(|_| "RELEASE.json size does not fit in memory")?;
+        let mut contents = Vec::new();
+        contents
+            .try_reserve_exact(capacity)
+            .map_err(|error| format!("Cannot reserve bounded manifest memory: {error}"))?;
+        Some(contents)
+    } else {
+        None
+    };
+    let mut hasher = Sha256::new();
+    let mut expanded_bytes = 0_u64;
+    let mut buffer = [0_u8; ZIP_STREAM_BUFFER_BYTES];
+
+    loop {
+        let count = reader
+            .read(&mut buffer)
+            .map_err(|error| format!("ZIP CRC failure: {error}"))?;
+        if count == 0 {
+            break;
+        }
+        let count = u64::try_from(count).map_err(|_| "ZIP read size overflow")?;
+        expanded_bytes = expanded_bytes
+            .checked_add(count)
+            .ok_or("ZIP member expanded-size overflow")?;
+        if expanded_bytes > limits.max_member_bytes {
+            return Err(format!(
+                "ZIP member exceeds the per-member expanded-size limit: {name}"
+            ));
+        }
+        *total_expanded = total_expanded
+            .checked_add(count)
+            .ok_or("ZIP aggregate expanded-size overflow")?;
+        if *total_expanded > limits.max_total_bytes {
+            return Err("ZIP exceeds the aggregate expanded-size limit".into());
+        }
+        let count = usize::try_from(count).map_err(|_| "ZIP read size does not fit in memory")?;
+        hasher.update(&buffer[..count]);
+        if let Some(contents) = &mut contents {
+            contents.extend_from_slice(&buffer[..count]);
+        }
+    }
+
+    if expanded_bytes != declared_size {
+        return Err(format!(
+            "ZIP member expanded size differs from its declaration: {name}"
+        ));
+    }
+
+    Ok((
+        VerifiedMember {
+            expanded_bytes,
+            sha256: format!("{:x}", hasher.finalize()),
+        },
+        contents,
+    ))
+}
+
 fn verify_with_environment(
     repo: &Path,
     archive_path: &Path,
     environment: &[(OsString, OsString)],
 ) -> Result<Manifest, String> {
+    verify_with_limits(repo, archive_path, environment, DEFAULT_RESOURCE_LIMITS)
+}
+
+fn verify_with_limits(
+    repo: &Path,
+    archive_path: &Path,
+    environment: &[(OsString, OsString)],
+    limits: ResourceLimits,
+) -> Result<Manifest, String> {
     assert_git_identity(repo, environment)?;
     let file = File::open(archive_path).map_err(|e| e.to_string())?;
+    let archive_bytes = file.metadata().map_err(|e| e.to_string())?.len();
+    if archive_bytes > limits.max_archive_bytes {
+        return Err("ZIP archive exceeds the compressed-input-size limit".into());
+    }
     let mut zip = ZipArchive::new(file).map_err(|e| e.to_string())?;
+    if zip.len() > limits.max_entries {
+        return Err(format!("ZIP entry count exceeds {}", limits.max_entries));
+    }
     if let Err(error) = zip.validate_header_consistency() {
         let message = error.to_string();
         if message.contains("duplicate file names") {
@@ -299,9 +435,10 @@ fn verify_with_environment(
     let mut canonical_names = BTreeSet::new();
     let mut canonical_paths = Vec::new();
     let mut prefixes = BTreeSet::new();
-    let mut files = HashMap::new();
+    let mut entries = Vec::with_capacity(zip.len());
+    let mut declared_total = 0_u64;
     for index in 0..zip.len() {
-        let mut member = zip.by_index(index).map_err(|e| e.to_string())?;
+        let member = zip.by_index(index).map_err(|e| e.to_string())?;
         let name = member.name().map_err(|e| e.to_string())?.into_owned();
         if member.name_raw() != name.as_bytes() {
             return Err("Noncanonical ZIP member name encoding".into());
@@ -322,11 +459,22 @@ fn verify_with_environment(
         }
         canonical_paths.push(canonical);
         prefixes.insert(format!("MRI-Drive-Maker-v{version}"));
-        let mut contents = Vec::new();
-        member
-            .read_to_end(&mut contents)
-            .map_err(|e| format!("ZIP CRC failure: {e}"))?;
-        files.insert(name, contents);
+        let declared_size = member.size();
+        if declared_size > limits.max_member_bytes {
+            return Err(format!(
+                "ZIP member exceeds the per-member expanded-size limit: {name}"
+            ));
+        }
+        if name.ends_with("/RELEASE.json") && declared_size > limits.max_manifest_bytes {
+            return Err("RELEASE.json exceeds the manifest-size limit".into());
+        }
+        declared_total = declared_total
+            .checked_add(declared_size)
+            .ok_or("ZIP aggregate expanded-size overflow")?;
+        if declared_total > limits.max_total_bytes {
+            return Err("ZIP exceeds the aggregate expanded-size limit".into());
+        }
+        entries.push((name, declared_size));
     }
     for path in &canonical_paths {
         let parts: Vec<&str> = path.split('/').collect();
@@ -345,11 +493,38 @@ fn verify_with_environment(
         .strip_prefix("MRI-Drive-Maker-v")
         .ok_or("Invalid package root")?;
     let prefix = root.to_owned() + "/";
-    let manifest_bytes = files
-        .get(&(prefix.clone() + "RELEASE.json"))
-        .ok_or("Missing RELEASE.json")?;
+    let release_manifest_member_name = prefix.clone() + "RELEASE.json";
+    if !names.contains(&release_manifest_member_name) {
+        return Err("Missing RELEASE.json".into());
+    }
+
+    let mut members = HashMap::with_capacity(entries.len());
+    let mut manifest_bytes = None;
+    let mut actual_total = 0_u64;
+    for (index, (expected_name, expected_size)) in entries.iter().enumerate() {
+        let mut member = zip.by_index(index).map_err(|e| e.to_string())?;
+        let name = member.name().map_err(|e| e.to_string())?.into_owned();
+        let declared_size = member.size();
+        if name.as_str() != expected_name.as_str() || declared_size != *expected_size {
+            return Err("ZIP metadata changed after resource preflight".into());
+        }
+        let (verified, contents) = stream_member(
+            &mut member,
+            &name,
+            declared_size,
+            name == release_manifest_member_name,
+            &mut actual_total,
+            limits,
+        )?;
+        if name == release_manifest_member_name {
+            manifest_bytes = contents;
+        }
+        members.insert(name, verified);
+    }
+
+    let manifest_bytes = manifest_bytes.ok_or("Missing RELEASE.json")?;
     let manifest: Manifest =
-        serde_json::from_slice(manifest_bytes).map_err(|e| format!("Bad RELEASE.json: {e}"))?;
+        serde_json::from_slice(&manifest_bytes).map_err(|e| format!("Bad RELEASE.json: {e}"))?;
     if manifest.version != version {
         return Err("Package version does not match its root".into());
     }
@@ -374,15 +549,27 @@ fn verify_with_environment(
         return Err("Every packaged file must have a source origin".into());
     }
     for (name, source) in &manifest.source_files {
-        let contents = files
+        let verified = members
             .get(&manifest_name(name, &prefix))
             .ok_or("Missing declared package file")?;
-        if digest(contents) != manifest.sha256[name] {
+        if verified.sha256 != manifest.sha256[name] {
             return Err(format!("Package file SHA-256 mismatch: {name}"));
         }
-        if committed_with_environment(repo, &manifest.source_commit, source, environment)?
-            != *contents
-        {
+        let source_size =
+            committed_size_with_environment(repo, &manifest.source_commit, source, environment)?;
+        if source_size > limits.max_member_bytes {
+            return Err(format!(
+                "Committed source exceeds the per-member size limit: {name}"
+            ));
+        }
+        if source_size != verified.expanded_bytes {
+            return Err(format!("Source differs from declared Git commit: {name}"));
+        }
+        let source_contents =
+            committed_with_environment(repo, &manifest.source_commit, source, environment)?;
+        let source_bytes =
+            u64::try_from(source_contents.len()).map_err(|_| "Committed source size overflow")?;
+        if source_bytes != verified.expanded_bytes || digest(&source_contents) != verified.sha256 {
             return Err(format!("Source differs from declared Git commit: {name}"));
         }
     }

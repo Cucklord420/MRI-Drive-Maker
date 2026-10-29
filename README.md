@@ -41,6 +41,8 @@ cargo run --locked --manifest-path rust/mri-release/Cargo.toml -- --verify candi
 
 The Rust program is the only supported release builder and verifier. The former Python entry point was retired after the Rust archive passed byte-for-byte parity checks during the migration; it is no longer present in the working tree or used by CI. CI tests the Rust CLI in debug and optimized release builds, then opens the generated download on Windows using the shipped launcher and startup tests. The existing published v0.3.0 download is not automatically replaced by this migration. No proprietary MRI source files or physical USB media are used in packaging tests.
 
+The Rust verifier limits compressed ZIP input to **128 MiB**, member count to **4,096**, any expanded member to **16 MiB**, aggregate expanded data to **64 MiB**, and `RELEASE.json` to **1 MiB**. It checks declared sizes before expansion, then streams each member while checking actual byte counts, CRC, and SHA-256. Only the bounded manifest and per-member hashes and sizes are retained.
+
 ## Validation, license and cost
 
 Windows CI checks real entry points, selection/confirmation, simulated failures, ISO mounting, native process cancellation, and FAT32/copy/hash operations on owned disposable virtual disks. Four actual copy-worker lifetimes overlap in the concurrency test. The selected-batch check also cleans existing multi-partition contents and ends without writing permanent erase registrations. See [Actions](https://github.com/Cucklord420/MRI-Drive-Maker/actions) for results tied to source revisions.
