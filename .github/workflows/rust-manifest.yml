@@ -30,13 +30,13 @@ jobs:
         with:
           persist-credentials: false
       - name: Run Rust source-tree manifest self tests
-        run: cargo test --manifest-path rust/mri-manifest/Cargo.toml
+        run: cargo test --locked --manifest-path rust/mri-manifest/Cargo.toml
       - name: Require canonical Rust formatting
         run: cargo fmt --manifest-path rust/mri-manifest/Cargo.toml -- --check
       - name: Require strict Rust lint checks
-        run: cargo clippy --manifest-path rust/mri-manifest/Cargo.toml --all-targets -- -D warnings
+        run: cargo clippy --locked --manifest-path rust/mri-manifest/Cargo.toml --all-targets -- -D warnings
       - name: Build read-only Rust manifest CLI
-        run: cargo build --manifest-path rust/mri-manifest/Cargo.toml
+        run: cargo build --locked --manifest-path rust/mri-manifest/Cargo.toml
       - name: Compare 400 synthetic manifests with real Get-MRIManifest
         shell: powershell
         run: ./tests/RustManifestParity.ps1

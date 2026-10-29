@@ -44,10 +44,18 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: Install Windows Rust format and lint components
+        shell: pwsh
+        run: rustup component add rustfmt clippy
       - name: Check Rust formatting
         shell: pwsh
         run: |
           cargo fmt --manifest-path rust/mri-release/Cargo.toml -- --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Enforce strict Windows Rust release lints
+        shell: pwsh
+        run: |
+          cargo clippy --locked --manifest-path rust/mri-release/Cargo.toml --all-targets -- -D warnings
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Run Rust release integrity tests in debug and release profiles
         shell: pwsh

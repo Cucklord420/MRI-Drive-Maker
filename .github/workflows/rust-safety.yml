@@ -28,10 +28,16 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+      - name: Install Rust format and lint components
+        run: rustup component add rustfmt clippy
+      - name: Verify Rust selection policy formatting
+        run: cargo fmt --manifest-path rust/mri-safety/Cargo.toml -- --check
+      - name: Enforce strict Rust selection policy lints
+        run: cargo clippy --locked --manifest-path rust/mri-safety/Cargo.toml --all-targets -- -D warnings
       - name: Rust unit and 100-case policy self-tests
-        run: cargo test --manifest-path rust/mri-safety/Cargo.toml
+        run: cargo test --locked --manifest-path rust/mri-safety/Cargo.toml
       - name: Build isolated read-only selection executable
-        run: cargo build --manifest-path rust/mri-safety/Cargo.toml
+        run: cargo build --locked --manifest-path rust/mri-safety/Cargo.toml
       - name: Compare Rust to original PowerShell with disposable inventories
         shell: powershell
         run: ./tests/RustSelectionParity.ps1
