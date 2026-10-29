@@ -16,7 +16,7 @@ use zip::{write::SimpleFileOptions, CompressionMethod, DateTime, ZipArchive, Zip
 #[cfg(test)]
 thread_local! {
     static LAST_STAGED_PATH: std::cell::RefCell<Option<PathBuf>> =
-        std::cell::RefCell::new(None);
+        const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(test)]
