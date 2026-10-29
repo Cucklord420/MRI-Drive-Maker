@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Rust mirror of scripts/Build-Download.py: reproducible committed-source ZIPs.
+//! Reproducible committed-source ZIP generator and verifier.
 //! Does not touch USB devices or execute any bundled scripts.
 use indexmap::IndexMap;
 use regex::Regex;

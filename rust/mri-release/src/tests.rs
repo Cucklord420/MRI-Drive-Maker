@@ -340,22 +340,6 @@ fn git_identity_accepts_equivalent_paths_with_dot_segments() {
     );
 }
 
-fn python_builder(args: &[&str]) -> serde_json::Value {
-    let script = repo_root().join("scripts/Build-Download.py");
-    let output = Command::new("python3")
-        .arg(script)
-        .args(args)
-        .current_dir(repo_root())
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "Original Python tool failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    serde_json::from_slice(&output.stdout).unwrap()
-}
-
 #[derive(Clone, Copy)]
 enum TestEntryKind {
     File,
@@ -704,44 +688,6 @@ fn members(path: &Path) -> ReleaseMembers {
         result.insert(name, (bytes, meta));
     }
     result
-}
-
-#[test]
-fn python_release_zip_has_exact_same_entries_and_manifest_contents() {
-    let temp = tempfile::tempdir().unwrap();
-    let py = temp.path().join("python-candidate.zip");
-    let rust = temp.path().join("rust-candidate.zip");
-    let expected = python_builder(&["--output", py.to_str().unwrap()]);
-    let new = build(&repo_root(), &rust, "0.3.0").unwrap();
-    assert_eq!(
-        expected["files"].as_u64().unwrap(),
-        new.sha256.len() as u64 + 1
-    );
-    let py_entries = members(&py);
-    let rust_entries = members(&rust);
-    assert_eq!(py_entries.len(), rust_entries.len());
-    assert_eq!(
-        py_entries, rust_entries,
-        "ZIP members, timestamps or metadata differ"
-    );
-    let raw_python = fs::read(&py).unwrap();
-    let raw_rust = fs::read(&rust).unwrap();
-    if raw_python != raw_rust {
-        let offset = raw_python
-            .iter()
-            .zip(raw_rust.iter())
-            .position(|(a, b)| a != b)
-            .unwrap_or(raw_python.len().min(raw_rust.len()));
-        let start = offset.saturating_sub(16);
-        let end = (offset + 32).min(raw_python.len()).min(raw_rust.len());
-        panic!("ZIP binary parity differs at byte {offset}; Python bytes={}, Rust bytes={}; Python window {:02x?}; Rust window {:02x?}",
-            raw_python.len(),raw_rust.len(),&raw_python[start..end],&raw_rust[start..end]);
-    }
-    assert_eq!(verify(&repo_root(), &rust).unwrap(), new);
-    let py_original_verified = python_builder(&["--verify", rust.to_str().unwrap()]);
-    assert_eq!(py_original_verified["source_commit"], new.source_commit);
-    assert_eq!(py_original_verified["files"], new.sha256.len());
-    assert_eq!(verify(&repo_root(), &py).unwrap(), new);
 }
 
 #[test]
