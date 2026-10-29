@@ -327,31 +327,177 @@ fn read_exact_at<R: Read + Seek>(
     reader.read_exact(buffer)
 }
 
-fn zip64_entry_count<R: Read + Seek>(reader: &mut R, eocd_offset: u64) -> Option<u64> {
+#[derive(Clone, Copy)]
+struct Zip64Directory {
+    entry_count: u64,
+    directory_size: u64,
+    directory_offset: u64,
+    archive_prefix: u64,
+    eocd_offset: u64,
+}
+
+fn zip64_directory_at<R: Read + Seek>(
+    reader: &mut R,
+    zip64_offset: u64,
+    locator_offset: u64,
+    relative_offset: u64,
+) -> Option<Zip64Directory> {
+    let mut zip64_eocd = [0_u8; 56];
+    read_exact_at(reader, zip64_offset, &mut zip64_eocd).ok()?;
+    if zip64_eocd[..4] != *b"PK\x06\x06" {
+        return None;
+    }
+    let record_size = u64::from_le_bytes(zip64_eocd[4..12].try_into().ok()?);
+    let record_end = zip64_offset.checked_add(12)?.checked_add(record_size)?;
+    if record_size < 44 || record_end != locator_offset {
+        return None;
+    }
+    let archive_prefix = zip64_offset.checked_sub(relative_offset)?;
+    let entries_on_disk = u64::from_le_bytes(zip64_eocd[24..32].try_into().ok()?);
+    let entries_total = u64::from_le_bytes(zip64_eocd[32..40].try_into().ok()?);
+    let directory_size = u64::from_le_bytes(zip64_eocd[40..48].try_into().ok()?);
+    let directory_offset = u64::from_le_bytes(zip64_eocd[48..56].try_into().ok()?);
+    Some(Zip64Directory {
+        entry_count: entries_on_disk.max(entries_total),
+        directory_size,
+        directory_offset,
+        archive_prefix,
+        eocd_offset: zip64_offset,
+    })
+}
+
+fn zip64_directory<R: Read + Seek>(reader: &mut R, eocd_offset: u64) -> Option<Zip64Directory> {
     const LOCATOR_BYTES: u64 = 20;
-    const ZIP64_EOCD_FIXED_BYTES: u64 = 56;
+    const BUFFER_BYTES: usize = 64 * 1024;
     let locator_offset = eocd_offset.checked_sub(LOCATOR_BYTES)?;
     let mut locator = [0_u8; LOCATOR_BYTES as usize];
     read_exact_at(reader, locator_offset, &mut locator).ok()?;
     if locator[..4] != *b"PK\x06\x07" {
         return None;
     }
-
-    let zip64_offset = u64::from_le_bytes(locator[8..16].try_into().ok()?);
-    let mut zip64_eocd = [0_u8; ZIP64_EOCD_FIXED_BYTES as usize];
-    read_exact_at(reader, zip64_offset, &mut zip64_eocd).ok()?;
-    if zip64_eocd[..4] != *b"PK\x06\x06" {
-        return None;
-    }
-    let record_size = u64::from_le_bytes(zip64_eocd[4..12].try_into().ok()?);
-    if record_size < 44 || zip64_offset.checked_add(12)?.checked_add(record_size)? > locator_offset
+    let relative_offset = u64::from_le_bytes(locator[8..16].try_into().ok()?);
+    if let Some(directory) =
+        zip64_directory_at(reader, relative_offset, locator_offset, relative_offset)
     {
-        return None;
+        return Some(directory);
     }
 
-    let entries_on_disk = u64::from_le_bytes(zip64_eocd[24..32].try_into().ok()?);
-    let entries_total = u64::from_le_bytes(zip64_eocd[32..40].try_into().ok()?);
-    Some(entries_on_disk.max(entries_total))
+    // The locator offset is archive-relative. Search backwards for the actual record when the
+    // ZIP has a self-extracting prefix, while keeping the scan buffer fixed and small.
+    let mut buffer = [0_u8; BUFFER_BYTES];
+    let mut range_end = locator_offset;
+    while range_end != 0 {
+        let range_start = range_end.saturating_sub(BUFFER_BYTES as u64);
+        let range_len = usize::try_from(range_end - range_start).ok()?;
+        read_exact_at(reader, range_start, &mut buffer[..range_len]).ok()?;
+        if range_len >= 4 {
+            for index in (0..=range_len - 4).rev() {
+                if buffer[index..index + 4] != *b"PK\x06\x06" {
+                    continue;
+                }
+                let candidate = range_start + index as u64;
+                if let Some(directory) =
+                    zip64_directory_at(reader, candidate, locator_offset, relative_offset)
+                {
+                    return Some(directory);
+                }
+            }
+        }
+        if range_start == 0 {
+            break;
+        }
+        range_end = range_start + 3;
+    }
+    None
+}
+
+fn find_central_directory_start<R: Read + Seek>(
+    reader: &mut R,
+    start: u64,
+    end: u64,
+) -> Option<u64> {
+    const BUFFER_BYTES: usize = 64 * 1024;
+    let mut buffer = [0_u8; BUFFER_BYTES];
+    let mut position = start;
+    while position.checked_add(4)? <= end {
+        let read_len = usize::try_from((end - position).min(BUFFER_BYTES as u64)).ok()?;
+        read_exact_at(reader, position, &mut buffer[..read_len]).ok()?;
+        if read_len >= 4 {
+            for index in 0..=read_len - 4 {
+                if buffer[index..index + 4] == *b"PK\x01\x02" {
+                    return Some(position + index as u64);
+                }
+            }
+        }
+        if read_len <= 3 {
+            break;
+        }
+        position = position.checked_add((read_len - 3) as u64)?;
+    }
+    None
+}
+
+fn central_entries_are_readable<R: Read + Seek>(
+    reader: &mut R,
+    mut position: u64,
+    directory_end: u64,
+    count: usize,
+) -> bool {
+    for _ in 0..count {
+        if position
+            .checked_add(46)
+            .is_none_or(|end| end > directory_end)
+        {
+            return false;
+        }
+        let mut header = [0_u8; 46];
+        if read_exact_at(reader, position, &mut header).is_err() || header[..4] != *b"PK\x01\x02" {
+            return false;
+        }
+        let name_len = u16::from_le_bytes([header[28], header[29]]) as u64;
+        let extra_len = u16::from_le_bytes([header[30], header[31]]) as u64;
+        let comment_len = u16::from_le_bytes([header[32], header[33]]) as u64;
+        let Some(next) = position
+            .checked_add(46)
+            .and_then(|value| value.checked_add(name_len))
+            .and_then(|value| value.checked_add(extra_len))
+            .and_then(|value| value.checked_add(comment_len))
+        else {
+            return false;
+        };
+        if next > directory_end {
+            return false;
+        }
+        position = next;
+    }
+    true
+}
+
+fn over_limit_central_directory_is_present<R: Read + Seek>(
+    reader: &mut R,
+    relative_offset: u64,
+    directory_size: u64,
+    archive_prefix: Option<u64>,
+    directory_limit: u64,
+    needed_entries: usize,
+) -> bool {
+    let start = if let Some(prefix) = archive_prefix {
+        let Some(start) = relative_offset.checked_add(prefix) else {
+            return false;
+        };
+        start
+    } else if let Some(start) =
+        find_central_directory_start(reader, relative_offset, directory_limit)
+    {
+        start
+    } else {
+        return false;
+    };
+    let Some(directory_end) = start.checked_add(directory_size) else {
+        return false;
+    };
+    directory_end <= directory_limit
+        && central_entries_are_readable(reader, start, directory_end, needed_entries)
 }
 
 fn preflight_zip_entry_count<R: Read + Seek>(
@@ -404,28 +550,56 @@ fn preflight_zip_entry_count<R: Read + Seek>(
             || entries_total == u16::MAX as u64
             || directory_size == u32::MAX as u64
             || directory_offset == u32::MAX as u64;
-        let declared_entries = if zip64 {
-            let eocd_offset = tail_offset + position as u64;
-            let Some(zip64_entries) = zip64_entry_count(reader, eocd_offset) else {
-                continue;
+        let (declared_entries, directory_size, directory_offset, archive_prefix, directory_limit) =
+            if zip64 {
+                let eocd_offset = tail_offset + position as u64;
+                let Some(directory) = zip64_directory(reader, eocd_offset) else {
+                    let fallback_entries = entries_on_disk.max(entries_total);
+                    if fallback_entries > max_entries as u64
+                        && directory_size != u32::MAX as u64
+                        && directory_offset != u32::MAX as u64
+                        && over_limit_central_directory_is_present(
+                            reader,
+                            directory_offset,
+                            directory_size,
+                            None,
+                            eocd_offset,
+                            max_entries.saturating_add(1),
+                        )
+                    {
+                        return Err(format!("ZIP entry count exceeds {max_entries}"));
+                    }
+                    continue;
+                };
+                (
+                    directory.entry_count,
+                    directory.directory_size,
+                    directory.directory_offset,
+                    Some(directory.archive_prefix),
+                    directory.eocd_offset,
+                )
+            } else {
+                (
+                    entries_on_disk.max(entries_total),
+                    directory_size,
+                    directory_offset,
+                    None,
+                    tail_offset + position as u64,
+                )
             };
-            zip64_entries
-                .max(if entries_on_disk == u16::MAX as u64 {
-                    0
-                } else {
-                    entries_on_disk
-                })
-                .max(if entries_total == u16::MAX as u64 {
-                    0
-                } else {
-                    entries_total
-                })
-        } else {
-            entries_on_disk.max(entries_total)
-        };
         found_eocd = true;
         if declared_entries > max_entries as u64 {
-            return Err(format!("ZIP entry count exceeds {max_entries}"));
+            let needed_entries = max_entries.saturating_add(1);
+            if over_limit_central_directory_is_present(
+                reader,
+                directory_offset,
+                directory_size,
+                archive_prefix,
+                directory_limit,
+                needed_entries,
+            ) {
+                return Err(format!("ZIP entry count exceeds {max_entries}"));
+            }
         }
     }
 

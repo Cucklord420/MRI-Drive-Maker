@@ -410,6 +410,42 @@ fn write_test_archive(path: &Path, entries: &[TestEntry]) {
     archive.finish().unwrap();
 }
 
+fn prepend_zip_prefix_and_upgrade_to_zip64(zip32: &[u8]) -> Vec<u8> {
+    let eocd = zip32.len() - 22;
+    let entry_count = u16::from_le_bytes([zip32[eocd + 10], zip32[eocd + 11]]) as u64;
+    let directory_size = u32::from_le_bytes(zip32[eocd + 12..eocd + 16].try_into().unwrap()) as u64;
+    let directory_offset =
+        u32::from_le_bytes(zip32[eocd + 16..eocd + 20].try_into().unwrap()) as u64;
+    let mut archive = zip32[..eocd].to_vec();
+    let zip64_eocd_offset = eocd as u64;
+    archive.extend_from_slice(b"PK\x06\x06");
+    archive.extend_from_slice(&44_u64.to_le_bytes());
+    archive.extend_from_slice(&45_u16.to_le_bytes());
+    archive.extend_from_slice(&45_u16.to_le_bytes());
+    archive.extend_from_slice(&0_u32.to_le_bytes());
+    archive.extend_from_slice(&0_u32.to_le_bytes());
+    archive.extend_from_slice(&entry_count.to_le_bytes());
+    archive.extend_from_slice(&entry_count.to_le_bytes());
+    archive.extend_from_slice(&directory_size.to_le_bytes());
+    archive.extend_from_slice(&directory_offset.to_le_bytes());
+    archive.extend_from_slice(b"PK\x06\x07");
+    archive.extend_from_slice(&0_u32.to_le_bytes());
+    archive.extend_from_slice(&zip64_eocd_offset.to_le_bytes());
+    archive.extend_from_slice(&1_u32.to_le_bytes());
+    archive.extend_from_slice(b"PK\x05\x06");
+    archive.extend_from_slice(&0_u16.to_le_bytes());
+    archive.extend_from_slice(&0_u16.to_le_bytes());
+    archive.extend_from_slice(&u16::MAX.to_le_bytes());
+    archive.extend_from_slice(&u16::MAX.to_le_bytes());
+    archive.extend_from_slice(&u32::MAX.to_le_bytes());
+    archive.extend_from_slice(&u32::MAX.to_le_bytes());
+    archive.extend_from_slice(&0_u16.to_le_bytes());
+
+    let mut prefixed = b"synthetic ZIP prefix".to_vec();
+    prefixed.extend_from_slice(&archive);
+    prefixed
+}
+
 fn write_repetitive_deflated_archive(path: &Path, entries: &[(String, u64)]) {
     let date = DateTime::from_date_and_time(2000, 1, 1, 0, 0, 0).unwrap();
     let options = SimpleFileOptions::default()
@@ -1112,12 +1148,14 @@ fn rust_rejects_archives_over_the_entry_count_limit() {
 fn rust_rejects_declared_entry_count_before_parsing_the_central_directory() {
     let temp = tempfile::tempdir().unwrap();
     let archive = temp.path().join("oversized-declared-entry-count.zip");
-    write_test_archive(&archive, &[]);
-    let mut bytes = fs::read(&archive).unwrap();
-    let eocd = bytes.len() - 22;
-    bytes[eocd + 8..eocd + 10].copy_from_slice(&5_u16.to_le_bytes());
-    bytes[eocd + 10..eocd + 12].copy_from_slice(&5_u16.to_le_bytes());
-    fs::write(&archive, bytes).unwrap();
+    let entries = (0..5)
+        .map(|index| TestEntry {
+            name: format!("MRI-Drive-Maker-v0.3.0/App/empty-{index}.txt"),
+            contents: Vec::new(),
+            kind: TestEntryKind::File,
+        })
+        .collect::<Vec<_>>();
+    write_test_archive(&archive, &entries);
 
     let limits = ResourceLimits {
         max_entries: 4,
@@ -1129,35 +1167,64 @@ fn rust_rejects_declared_entry_count_before_parsing_the_central_directory() {
 }
 
 #[test]
-fn zip64_entry_count_is_checked_before_archive_construction() {
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"PK\x06\x06");
-    bytes.extend_from_slice(&44_u64.to_le_bytes());
-    bytes.extend_from_slice(&45_u16.to_le_bytes());
-    bytes.extend_from_slice(&45_u16.to_le_bytes());
-    bytes.extend_from_slice(&0_u32.to_le_bytes());
-    bytes.extend_from_slice(&0_u32.to_le_bytes());
-    bytes.extend_from_slice(&5_u64.to_le_bytes());
-    bytes.extend_from_slice(&5_u64.to_le_bytes());
-    bytes.extend_from_slice(&0_u64.to_le_bytes());
-    bytes.extend_from_slice(&0_u64.to_le_bytes());
-    bytes.extend_from_slice(b"PK\x06\x07");
-    bytes.extend_from_slice(&0_u32.to_le_bytes());
-    bytes.extend_from_slice(&0_u64.to_le_bytes());
-    bytes.extend_from_slice(&1_u32.to_le_bytes());
-    bytes.extend_from_slice(b"PK\x05\x06");
-    bytes.extend_from_slice(&0_u16.to_le_bytes());
-    bytes.extend_from_slice(&0_u16.to_le_bytes());
-    bytes.extend_from_slice(&u16::MAX.to_le_bytes());
-    bytes.extend_from_slice(&u16::MAX.to_le_bytes());
-    bytes.extend_from_slice(&u32::MAX.to_le_bytes());
-    bytes.extend_from_slice(&u32::MAX.to_le_bytes());
-    bytes.extend_from_slice(&0_u16.to_le_bytes());
+fn zip64_entry_count_preflight_supports_prepended_archives() {
+    let temp = tempfile::tempdir().unwrap();
+    let zip32 = temp.path().join("ordinary.zip");
+    let entries = (0..5)
+        .map(|index| TestEntry {
+            name: format!("MRI-Drive-Maker-v0.3.0/App/empty-{index}.txt"),
+            contents: Vec::new(),
+            kind: TestEntryKind::File,
+        })
+        .collect::<Vec<_>>();
+    write_test_archive(&zip32, &entries);
+    let bytes = prepend_zip_prefix_and_upgrade_to_zip64(&fs::read(zip32).unwrap());
+    let mut parsed = ZipArchive::new(Cursor::new(bytes.clone())).unwrap();
+    assert_eq!(
+        parsed.len(),
+        5,
+        "fixture must be a valid prefixed ZIP64 archive"
+    );
 
+    let archive_len = bytes.len() as u64;
     let mut archive = Cursor::new(bytes);
-    let error = preflight_zip_entry_count(&mut archive, 98, 4)
+    let error = preflight_zip_entry_count(&mut archive, archive_len, 4)
         .expect_err("ZIP64 entry count must be rejected before archive construction");
     assert!(error.contains("ZIP entry count exceeds 4"), "{error}");
+}
+
+#[test]
+fn zip_comment_eocd_decoy_does_not_override_the_real_entry_count() {
+    let temp = tempfile::tempdir().unwrap();
+    let archive = temp.path().join("comment-decoy.zip");
+    write_test_archive(
+        &archive,
+        &[TestEntry {
+            name: "MRI-Drive-Maker-v0.3.0/App/one.txt".into(),
+            contents: b"one".to_vec(),
+            kind: TestEntryKind::File,
+        }],
+    );
+    let mut bytes = fs::read(&archive).unwrap();
+    let eocd = bytes.len() - 22;
+    let directory_size = bytes[eocd + 12..eocd + 16].to_vec();
+    let directory_offset = bytes[eocd + 16..eocd + 20].to_vec();
+    bytes[eocd + 20..eocd + 22].copy_from_slice(&22_u16.to_le_bytes());
+
+    let mut decoy = [0_u8; 22];
+    decoy[..4].copy_from_slice(b"PK\x05\x06");
+    decoy[8..10].copy_from_slice(&5_u16.to_le_bytes());
+    decoy[10..12].copy_from_slice(&5_u16.to_le_bytes());
+    decoy[12..16].copy_from_slice(&directory_size);
+    decoy[16..20].copy_from_slice(&directory_offset);
+    bytes.extend_from_slice(&decoy);
+
+    let archive_len = bytes.len() as u64;
+    let mut archive = Cursor::new(bytes.clone());
+    preflight_zip_entry_count(&mut archive, archive_len, 4)
+        .expect("an EOCD signature in a ZIP comment must not reject a valid archive");
+    let mut parsed = ZipArchive::new(Cursor::new(bytes)).unwrap();
+    assert_eq!(parsed.len(), 1);
 }
 
 #[test]
