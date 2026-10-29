@@ -34,12 +34,12 @@ Existing command-line actions and optional setup-batch recipes remain available.
 The candidate download is generated and verified by Rust directly from the pinned Git revision:
 
 ```text
-cargo test --manifest-path rust/mri-release/Cargo.toml
-cargo run --manifest-path rust/mri-release/Cargo.toml -- --output candidate.zip
-cargo run --manifest-path rust/mri-release/Cargo.toml -- --verify candidate.zip
+cargo test --locked --manifest-path rust/mri-release/Cargo.toml
+cargo run --locked --manifest-path rust/mri-release/Cargo.toml -- --output candidate.zip
+cargo run --locked --manifest-path rust/mri-release/Cargo.toml -- --verify candidate.zip
 ```
 
-The original Python packager is retained only as a differential reference. CI requires **byte-for-byte identical ZIPs**, including the release manifest and central-directory metadata, and opens the real Rust-generated download on Windows using the shipped launcher and startup tests. The existing published v0.3.0 download is not automatically replaced by this migration. No proprietary MRI source files or physical USB media are used in packaging tests.
+The Rust program is the only supported release builder and verifier. The former Python entry point was retired after the Rust archive passed byte-for-byte parity checks during the migration; it is no longer present in the working tree or used by CI. CI tests the Rust CLI in debug and optimized release builds, then opens the generated download on Windows using the shipped launcher and startup tests. The existing published v0.3.0 download is not automatically replaced by this migration. No proprietary MRI source files or physical USB media are used in packaging tests.
 
 ## Validation, license and cost
 

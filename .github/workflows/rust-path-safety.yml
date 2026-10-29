@@ -2,6 +2,7 @@ name: Rust MRI safe relative paths (Windows parity)
 on:
   push:
     paths:
+      - 'rust-toolchain.toml'
       - 'rust/mri-path-safety/**'
       - 'MRI.Batch.psm1'
       - 'tests/RustPathParity.ps1'
@@ -11,6 +12,11 @@ on:
 
 permissions:
   contents: read
+
+# Cancel superseded runs per event; keep push and pull_request checks independent.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}-${{ (github.event_name == 'workflow_dispatch' || github.run_attempt != '1') && github.run_id || 'automatic' }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' && github.run_attempt == '1' }}
 
 jobs:
   relative-path-policy:
@@ -26,11 +32,11 @@ jobs:
       - name: Verify Rust path policy formatting
         run: cargo fmt --manifest-path rust/mri-path-safety/Cargo.toml -- --check
       - name: Enforce strict Rust path policy lints
-        run: cargo clippy --manifest-path rust/mri-path-safety/Cargo.toml --all-targets -- -D warnings
+        run: cargo clippy --locked --manifest-path rust/mri-path-safety/Cargo.toml --all-targets -- -D warnings
       - name: Run Rust positive, negative and 200-mutant self-tests
-        run: cargo test --manifest-path rust/mri-path-safety/Cargo.toml
+        run: cargo test --locked --manifest-path rust/mri-path-safety/Cargo.toml
       - name: Build read-only Rust path normalizer
-        run: cargo build --manifest-path rust/mri-path-safety/Cargo.toml
+        run: cargo build --locked --manifest-path rust/mri-path-safety/Cargo.toml
       - name: Verify 635 Windows PowerShell differential cases
         shell: powershell
         run: ./tests/RustPathParity.ps1
