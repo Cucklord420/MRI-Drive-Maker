@@ -454,7 +454,7 @@ fn add_zip64_extensible_decoy(zip64: &mut Vec<u8>, decoy_entries: u64) {
     let record = locator.checked_sub(56).expect("fixed ZIP64 record");
     assert_eq!(&zip64[record..record + 4], b"PK\x06\x06");
 
-    let extension = vec![0_u8; 160];
+    let extension = [0_u8; 160];
     zip64.splice(locator..locator, extension.iter().copied());
     let new_locator = locator + extension.len();
     zip64[record + 4..record + 12]
@@ -1310,7 +1310,7 @@ fn zip64_candidate_scanning_has_a_bounded_total_read_budget() {
     for _ in 0..DECOY_COUNT {
         decoys.extend_from_slice(b"PK\x06\x07");
         decoys.extend_from_slice(&0_u32.to_le_bytes());
-        decoys.extend_from_slice(&u64::MAX.to_le_bytes());
+        decoys.extend_from_slice(&0_u64.to_le_bytes());
         decoys.extend_from_slice(&1_u32.to_le_bytes());
         decoys.extend_from_slice(b"PK\x05\x06");
         decoys.extend_from_slice(&0_u16.to_le_bytes());
