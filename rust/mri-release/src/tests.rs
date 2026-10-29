@@ -721,6 +721,140 @@ fn never_overwrites_candidate_or_accepts_untrusted_revision() {
     assert!(!path.exists());
 }
 
+fn assert_failed_archive_stage_cleans_output_and_allows_retry(stage: &str) {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    let output_dir = temp.path().join("output");
+    fs::create_dir_all(&output_dir).unwrap();
+    let path = output_dir.join("release.zip");
+    let clean_environment = test_environment(&[]);
+    synthetic_repository(
+        &repo,
+        "synthetic source bytes\n",
+        "@echo synthetic\r\n",
+        &clean_environment,
+    );
+
+    LAST_STAGED_PATH.with(|staged| *staged.borrow_mut() = None);
+    let failed_environment = test_environment(&[("MRI_RELEASE_TEST_FAILURE", stage.to_owned())]);
+    let error = build_with_environment(
+        &repo,
+        &path,
+        "0.3.0",
+        &synthetic_sources(),
+        &failed_environment,
+    )
+    .expect_err("injected build failure unexpectedly succeeded");
+    assert!(error.contains("injected"), "unexpected failure: {error}");
+    assert!(
+        !path.exists(),
+        "failed build left the requested destination"
+    );
+    assert_eq!(
+        fs::read_dir(&output_dir).unwrap().count(),
+        0,
+        "failed build left a temporary artifact"
+    );
+    let staged = LAST_STAGED_PATH
+        .with(|staged| staged.borrow_mut().take())
+        .expect("builder did not record its staged path");
+    assert_ne!(
+        staged, path,
+        "builder wrote directly to the requested destination"
+    );
+    assert_eq!(
+        staged.parent(),
+        path.parent(),
+        "staged archive must share the destination directory"
+    );
+
+    let retry = build_with_environment(
+        &repo,
+        &path,
+        "0.3.0",
+        &synthetic_sources(),
+        &clean_environment,
+    )
+    .unwrap();
+    assert_eq!(
+        verify_with_environment(&repo, &path, &clean_environment).unwrap(),
+        retry
+    );
+    assert_eq!(fs::read_dir(&output_dir).unwrap().count(), 1);
+}
+
+#[test]
+fn failed_archive_write_cleans_output_and_allows_retry() {
+    assert_failed_archive_stage_cleans_output_and_allows_retry("write");
+}
+
+#[test]
+fn failed_normalization_cleans_output_and_allows_retry() {
+    assert_failed_archive_stage_cleans_output_and_allows_retry("normalize");
+}
+
+#[test]
+fn failed_verification_cleans_output_and_allows_retry() {
+    assert_failed_archive_stage_cleans_output_and_allows_retry("verify");
+}
+
+#[test]
+fn destination_race_preserves_competing_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    let output_dir = temp.path().join("output");
+    fs::create_dir_all(&output_dir).unwrap();
+    let path = output_dir.join("release.zip");
+    let clean_environment = test_environment(&[]);
+    synthetic_repository(
+        &repo,
+        "synthetic source bytes\n",
+        "@echo synthetic\r\n",
+        &clean_environment,
+    );
+
+    LAST_STAGED_PATH.with(|staged| *staged.borrow_mut() = None);
+    let race_environment =
+        test_environment(&[("MRI_RELEASE_TEST_FAILURE", "destination-race".to_owned())]);
+    let error = build_with_environment(
+        &repo,
+        &path,
+        "0.3.0",
+        &synthetic_sources(),
+        &race_environment,
+    )
+    .expect_err("publication replaced a destination created after verification");
+    assert!(!error.is_empty());
+    assert_eq!(fs::read(&path).unwrap(), b"COMPETING");
+    assert_eq!(fs::read_dir(&output_dir).unwrap().count(), 1);
+    let staged = LAST_STAGED_PATH
+        .with(|staged| staged.borrow_mut().take())
+        .expect("builder did not record its staged path");
+    assert_ne!(
+        staged, path,
+        "builder wrote directly to the requested destination"
+    );
+    assert_eq!(
+        staged.parent(),
+        path.parent(),
+        "staged archive must share the destination directory"
+    );
+
+    fs::remove_file(&path).unwrap();
+    let retry = build_with_environment(
+        &repo,
+        &path,
+        "0.3.0",
+        &synthetic_sources(),
+        &clean_environment,
+    )
+    .unwrap();
+    assert_eq!(
+        verify_with_environment(&repo, &path, &clean_environment).unwrap(),
+        retry
+    );
+    assert_eq!(fs::read_dir(&output_dir).unwrap().count(), 1);
+}
 #[test]
 fn corrupt_archive_fails_closed() {
     let temp = tempfile::tempdir().unwrap();

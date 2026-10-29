@@ -13,6 +13,24 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use zip::{write::SimpleFileOptions, CompressionMethod, DateTime, ZipArchive, ZipWriter};
 
+#[cfg(test)]
+thread_local! {
+    static LAST_STAGED_PATH: std::cell::RefCell<Option<PathBuf>> =
+        std::cell::RefCell::new(None);
+}
+
+#[cfg(test)]
+fn record_staged_path(path: &Path) {
+    LAST_STAGED_PATH.with(|staged| *staged.borrow_mut() = Some(path.to_path_buf()));
+}
+
+#[cfg(test)]
+fn release_test_failure_requested(environment: &[(OsString, OsString)], stage: &str) -> bool {
+    environment.iter().any(|(key, value)| {
+        key.to_str() == Some("MRI_RELEASE_TEST_FAILURE") && value.to_str() == Some(stage)
+    })
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct Manifest {
     version: String,
@@ -471,6 +489,8 @@ fn normalize_zip_creator_version(path: &Path) -> Result<(), String> {
         .write(true)
         .open(path)
         .map_err(|e| e.to_string())?;
+    #[cfg(test)]
+    record_staged_path(path);
     output.write_all(&bytes).map_err(|e| e.to_string())?;
     output.flush().map_err(|e| e.to_string())
 }
@@ -574,6 +594,8 @@ fn build_with_environment(
         .create_new(true)
         .open(path)
         .map_err(|e| e.to_string())?;
+    #[cfg(test)]
+    record_staged_path(path);
     let mut zip = ZipWriter::new(output);
     let date = DateTime::from_date_and_time(2000, 1, 1, 0, 0, 0)
         .map_err(|_| "Invalid fixed ZIP timestamp")?;
@@ -584,16 +606,36 @@ fn build_with_environment(
     let prefix = format!("MRI-Drive-Maker-v{version}/");
     let mut sorted: Vec<_> = entries.iter().collect();
     sorted.sort_by(|a, b| a.0.cmp(b.0));
+    #[cfg(test)]
+    let mut first_member = true;
     for (name, contents) in sorted {
         zip.start_file(format!("{prefix}{name}"), options)
             .map_err(|e| e.to_string())?;
         zip.write_all(contents).map_err(|e| e.to_string())?;
+        #[cfg(test)]
+        if first_member && release_test_failure_requested(environment, "write") {
+            return Err("injected ZIP write interruption".into());
+        }
+        #[cfg(test)]
+        first_member = false;
     }
     zip.finish().map_err(|e| e.to_string())?;
+    #[cfg(test)]
+    if release_test_failure_requested(environment, "normalize") {
+        return Err("injected normalization failure".into());
+    }
     normalize_zip_creator_version(path)?;
+    #[cfg(test)]
+    if release_test_failure_requested(environment, "verify") {
+        return Err("injected verification failure".into());
+    }
     let checked = verify_with_environment(repo, path, environment)?;
     if checked != manifest {
         return Err("Release verification differs from original manifest".into());
+    }
+    #[cfg(test)]
+    if release_test_failure_requested(environment, "destination-race") {
+        fs::write(path, b"COMPETING").map_err(|e| e.to_string())?;
     }
     Ok(manifest)
 }
