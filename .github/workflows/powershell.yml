@@ -80,13 +80,13 @@ jobs:
         shell: powershell
         run: |
           $archive=Join-Path $env:RUNNER_TEMP 'MRI-Drive-Maker-candidate.zip'
-          cargo run --quiet --manifest-path rust/mri-release/Cargo.toml -- --output $archive
+          cargo run --quiet --locked --manifest-path rust/mri-release/Cargo.toml -- --output $archive
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & ./tests/PackageSmoke.ps1 -ArchivePath $archive
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $published='./downloads/MRI-Drive-Maker-v0.3.0.zip'
           if (Test-Path -LiteralPath $published) {
-            cargo run --quiet --manifest-path rust/mri-release/Cargo.toml -- --verify $published
+            cargo run --quiet --locked --manifest-path rust/mri-release/Cargo.toml -- --verify $published
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             & ./tests/PackageSmoke.ps1 -ArchivePath $published
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
