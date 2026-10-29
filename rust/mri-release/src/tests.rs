@@ -1179,7 +1179,7 @@ fn zip64_entry_count_preflight_supports_prepended_archives() {
         .collect::<Vec<_>>();
     write_test_archive(&zip32, &entries);
     let bytes = prepend_zip_prefix_and_upgrade_to_zip64(&fs::read(zip32).unwrap());
-    let mut parsed = ZipArchive::new(Cursor::new(bytes.clone())).unwrap();
+    let parsed = ZipArchive::new(Cursor::new(bytes.clone())).unwrap();
     assert_eq!(
         parsed.len(),
         5,
@@ -1223,7 +1223,7 @@ fn zip_comment_eocd_decoy_does_not_override_the_real_entry_count() {
     let mut archive = Cursor::new(bytes.clone());
     preflight_zip_entry_count(&mut archive, archive_len, 4)
         .expect("an EOCD signature in a ZIP comment must not reject a valid archive");
-    let mut parsed = ZipArchive::new(Cursor::new(bytes)).unwrap();
+    let parsed = ZipArchive::new(Cursor::new(bytes)).unwrap();
     assert_eq!(parsed.len(), 1);
 }
 
