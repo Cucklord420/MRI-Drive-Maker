@@ -617,7 +617,9 @@ fn build_with_environment(
             return Err("injected ZIP write interruption".into());
         }
         #[cfg(test)]
-        first_member = false;
+        {
+            first_member = false;
+        }
     }
     zip.finish().map_err(|e| e.to_string())?;
     #[cfg(test)]
