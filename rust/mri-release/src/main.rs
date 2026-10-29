@@ -13,6 +13,24 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use zip::{write::SimpleFileOptions, CompressionMethod, DateTime, ZipArchive, ZipWriter};
 
+#[cfg(test)]
+thread_local! {
+    static LAST_STAGED_PATH: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn record_staged_path(path: &Path) {
+    LAST_STAGED_PATH.with(|staged| *staged.borrow_mut() = Some(path.to_path_buf()));
+}
+
+#[cfg(test)]
+fn release_test_failure_requested(environment: &[(OsString, OsString)], stage: &str) -> bool {
+    environment.iter().any(|(key, value)| {
+        key.to_str() == Some("MRI_RELEASE_TEST_FAILURE") && value.to_str() == Some(stage)
+    })
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct Manifest {
     version: String,
@@ -475,6 +493,55 @@ fn normalize_zip_creator_version(path: &Path) -> Result<(), String> {
     output.flush().map_err(|e| e.to_string())
 }
 
+#[cfg(unix)]
+fn create_staged_archive(parent: &Path) -> Result<tempfile::NamedTempFile, String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut builder = tempfile::Builder::new();
+    builder.permissions(fs::Permissions::from_mode(0o666));
+    builder.tempfile_in(parent).map_err(|e| e.to_string())
+}
+
+#[cfg(not(unix))]
+fn create_staged_archive(parent: &Path) -> Result<tempfile::NamedTempFile, String> {
+    tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())
+}
+
+fn publish_archive<W, N, V>(
+    destination: &Path,
+    write_archive: W,
+    normalize: N,
+    verify: V,
+) -> Result<Manifest, String>
+where
+    W: FnOnce(&mut tempfile::NamedTempFile) -> Result<(), String>,
+    N: FnOnce(&Path) -> Result<(), String>,
+    V: FnOnce(&Path) -> Result<Manifest, String>,
+{
+    let parent = destination
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+
+    let mut staged = create_staged_archive(parent)?;
+    #[cfg(test)]
+    record_staged_path(staged.path());
+
+    write_archive(&mut staged)?;
+    staged.as_file_mut().flush().map_err(|e| e.to_string())?;
+    staged.as_file().sync_all().map_err(|e| e.to_string())?;
+
+    normalize(staged.path())?;
+    staged.as_file().sync_all().map_err(|e| e.to_string())?;
+
+    let manifest = verify(staged.path())?;
+    staged
+        .persist_noclobber(destination)
+        .map_err(|e| format!("Unable to publish release ZIP without overwriting: {e}"))?;
+    Ok(manifest)
+}
+
 fn package_sources(repo: &Path) -> Result<Vec<(String, String)>, String> {
     let mut sources = Vec::new();
     for name in [
@@ -567,35 +634,68 @@ fn build_with_environment(
     manifest_bytes.push(b'\n');
     entries.insert("RELEASE.json".to_owned(), manifest_bytes);
 
-    fs::create_dir_all(path.parent().ok_or("Missing destination directory")?)
-        .map_err(|e| e.to_string())?;
-    let output = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|e| e.to_string())?;
-    let mut zip = ZipWriter::new(output);
-    let date = DateTime::from_date_and_time(2000, 1, 1, 0, 0, 0)
-        .map_err(|_| "Invalid fixed ZIP timestamp")?;
-    let options = SimpleFileOptions::default()
-        .compression_method(CompressionMethod::Stored)
-        .last_modified_time(date)
-        .unix_permissions(0o644);
     let prefix = format!("MRI-Drive-Maker-v{version}/");
     let mut sorted: Vec<_> = entries.iter().collect();
     sorted.sort_by(|a, b| a.0.cmp(b.0));
-    for (name, contents) in sorted {
-        zip.start_file(format!("{prefix}{name}"), options)
-            .map_err(|e| e.to_string())?;
-        zip.write_all(contents).map_err(|e| e.to_string())?;
-    }
-    zip.finish().map_err(|e| e.to_string())?;
-    normalize_zip_creator_version(path)?;
-    let checked = verify_with_environment(repo, path, environment)?;
-    if checked != manifest {
-        return Err("Release verification differs from original manifest".into());
-    }
-    Ok(manifest)
+    publish_archive(
+        path,
+        |staged| {
+            let mut zip = ZipWriter::new(staged.as_file_mut());
+            let date = DateTime::from_date_and_time(2000, 1, 1, 0, 0, 0)
+                .map_err(|_| "Invalid fixed ZIP timestamp")?;
+            let options = SimpleFileOptions::default()
+                .compression_method(CompressionMethod::Stored)
+                .last_modified_time(date)
+                .unix_permissions(0o644);
+            #[cfg(test)]
+            let mut first_member = true;
+            for (name, contents) in sorted {
+                zip.start_file(format!("{prefix}{name}"), options)
+                    .map_err(|e| e.to_string())?;
+                zip.write_all(contents).map_err(|e| e.to_string())?;
+                #[cfg(test)]
+                if first_member && release_test_failure_requested(environment, "write") {
+                    return Err("injected ZIP write interruption".into());
+                }
+                #[cfg(test)]
+                {
+                    first_member = false;
+                }
+            }
+            zip.finish().map_err(|e| e.to_string())?;
+            Ok(())
+        },
+        |staged_path| {
+            #[cfg(test)]
+            if release_test_failure_requested(environment, "normalize") {
+                return Err("injected normalization failure".into());
+            }
+            normalize_zip_creator_version(staged_path)
+        },
+        |staged_path| {
+            #[cfg(test)]
+            if release_test_failure_requested(environment, "verify") {
+                return Err("injected verification failure".into());
+            }
+            let checked = verify_with_environment(repo, staged_path, environment)?;
+            #[cfg(test)]
+            let checked = if release_test_failure_requested(environment, "manifest-mismatch") {
+                let mut mismatched = checked;
+                mismatched.version.push_str("-injected-mismatch");
+                mismatched
+            } else {
+                checked
+            };
+            if checked != manifest {
+                return Err("Release verification differs from original manifest".into());
+            }
+            #[cfg(test)]
+            if release_test_failure_requested(environment, "destination-race") {
+                fs::write(path, b"COMPETING").map_err(|e| e.to_string())?;
+            }
+            Ok(checked)
+        },
+    )
 }
 fn build(repo: &Path, path: &Path, version: &str) -> Result<Manifest, String> {
     let sources = package_sources(repo)?;
