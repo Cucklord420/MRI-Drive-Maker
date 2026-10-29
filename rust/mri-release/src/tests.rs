@@ -745,7 +745,14 @@ fn assert_failed_archive_stage_cleans_output_and_allows_retry(stage: &str) {
         &failed_environment,
     )
     .expect_err("injected build failure unexpectedly succeeded");
-    assert!(error.contains("injected"), "unexpected failure: {error}");
+    if stage == "manifest-mismatch" {
+        assert!(
+            error.contains("differs from original manifest"),
+            "unexpected failure: {error}"
+        );
+    } else {
+        assert!(error.contains("injected"), "unexpected failure: {error}");
+    }
     assert!(
         !path.exists(),
         "failed build left the requested destination"
@@ -796,6 +803,11 @@ fn failed_normalization_cleans_output_and_allows_retry() {
 #[test]
 fn failed_verification_cleans_output_and_allows_retry() {
     assert_failed_archive_stage_cleans_output_and_allows_retry("verify");
+}
+
+#[test]
+fn manifest_mismatch_cleans_output_and_allows_retry() {
+    assert_failed_archive_stage_cleans_output_and_allows_retry("manifest-mismatch");
 }
 
 #[test]
