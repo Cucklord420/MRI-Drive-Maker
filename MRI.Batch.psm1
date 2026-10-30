@@ -304,19 +304,231 @@ function Assert-MRIRegistry {
         $keys[$r.Key]=$true; $serials[$r.Serial]=$true; $labels[$r.Label]=$true
     }
 }
-function Get-MRIProtectedKeys {
-    param([string[]]$Paths, [array]$Inventory)
-    foreach ($path in $Paths) {
-        $root=[IO.Path]::GetPathRoot([IO.Path]::GetFullPath($path))
-        if ($root -match '^([A-Za-z]):\\$') {
-            $partition=@(Get-Partition -DriveLetter $Matches[1] -ErrorAction Stop)
-            if (-not $partition.Count) { throw 'Could not resolve the source/automation disk. No target is allowed to be written.' }
-            foreach ($p in $partition) {
-                foreach ($d in @($Inventory | Where-Object { $_.Number -eq $p.DiskNumber })) {
-                    if (-not $d.Key) { throw 'A source/automation USB has no usable hardware identity. Use an internal source folder.' }; $d.Key
+function Get-MRIUNCServerKind {
+    param([string]$Server,[string[]]$LocalNames,[string[]]$LocalAddresses,[string[]]$ServerAddresses)
+    $nameSet=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in $LocalNames) {
+        if (-not [string]::IsNullOrWhiteSpace($name)) { [void]$nameSet.Add($name.Trim().TrimEnd('.')) }
+    }
+    $serverName=$Server.Trim().TrimEnd('.')
+    if ($nameSet.Contains($serverName)) { return 'Local' }
+    if (-not $ServerAddresses.Count) { throw 'Could not verify whether a network-share server is local or remote. No target is allowed to be written.' }
+    $localAddressSet=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($address in $LocalAddresses) {
+        $parsed=$null
+        if ([Net.IPAddress]::TryParse([string]$address,[ref]$parsed)) { [void]$localAddressSet.Add($parsed.ToString()) }
+    }
+    foreach ($address in $ServerAddresses) {
+        $parsed=$null
+        if ([Net.IPAddress]::TryParse([string]$address,[ref]$parsed) -and $localAddressSet.Contains($parsed.ToString())) { return 'Local' }
+    }
+    return 'Remote'
+}
+function Resolve-MRIUNCPath {
+    param([string]$Path)
+    $unc=$Path.Replace('/','\')
+    if ($unc -match '^\\\\\?\\Volume\{[0-9A-Fa-f-]+\}\\') { return $Path }
+    if ($unc.StartsWith('\\?\UNC\',[StringComparison]::OrdinalIgnoreCase)) { $unc='\\'+$unc.Substring(8) }
+    elseif ($unc -match '^\\\\\?\\[A-Za-z]:\\') { return $unc.Substring(4) }
+    elseif ($unc.StartsWith('\\?\',[StringComparison]::OrdinalIgnoreCase)) {
+        throw 'An unsupported device path cannot be mapped to a local disk. No target is allowed to be written.'
+    }
+    if (-not $unc.StartsWith('\\',[StringComparison]::Ordinal)) { return $Path }
+    $components=@($unc.Substring(2).Split([char[]]@('\')))
+    if ($components.Count -lt 2 -or [string]::IsNullOrWhiteSpace($components[0]) -or [string]::IsNullOrWhiteSpace($components[1])) {
+        throw 'A network-share path is incomplete. No target is allowed to be written.'
+    }
+    $server=[string]$components[0]; $shareName=[string]$components[1]
+    $localNames=@('localhost','.',[Environment]::MachineName,[string]$env:COMPUTERNAME)
+    $localAddresses=@('127.0.0.1','::1')
+    $serverAddresses=@()
+    $directLocal=($server -in $localNames -or $server -ieq [Environment]::MachineName -or $server -ieq $env:COMPUTERNAME)
+    if (-not $directLocal) {
+        $computer=@(Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop)
+        if ($computer.Count -ne 1) { throw 'Could not determine the local computer name for network-share safety.' }
+        foreach ($name in @($computer[0].Name,$computer[0].DNSHostName)) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$name)) { $localNames+=([string]$name) }
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$computer[0].Domain) -and
+            -not [string]::IsNullOrWhiteSpace([string]$computer[0].DNSHostName)) {
+            $localNames+=([string]$computer[0].DNSHostName+'.'+[string]$computer[0].Domain)
+        }
+        try {
+            $registry=[Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters',$false)
+            if ($null -ne $registry) {
+                try {
+                    foreach ($alias in $registry.GetValue('OptionalNames')) {
+                        if ($alias -is [string] -and -not [string]::IsNullOrWhiteSpace($alias)) { $localNames+=$alias }
+                    }
                 }
+                finally { $registry.Dispose() }
+            }
+        } catch { throw 'Could not inspect local SMB aliases. No target is allowed to be written.' }
+        $adapters=@(Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter 'IPEnabled = True' -ErrorAction Stop)
+        foreach ($adapter in $adapters) {
+            foreach ($address in @($adapter.IPAddress)) {
+                if (-not [string]::IsNullOrWhiteSpace([string]$address)) { $localAddresses+=([string]$address) }
             }
         }
+        $ip=$null
+        if ([Net.IPAddress]::TryParse($server,[ref]$ip)) { $serverAddresses=@($ip.ToString()) }
+        else { try { $serverAddresses=@([Net.Dns]::GetHostAddresses($server) | ForEach-Object { $_.ToString() }) } catch { } }
+    }
+    $serverKind=Get-MRIUNCServerKind $server $localNames $localAddresses $serverAddresses
+    if ($serverKind -eq 'Remote') { return $null }
+    for ($index=2; $index -lt $components.Count; $index++) {
+        $segment=[string]$components[$index]
+        if ($segment -in @('.','..') -or ([string]::IsNullOrWhiteSpace($segment) -and $index -lt ($components.Count-1))) {
+            throw 'A local network-share path contains an unsafe path segment. No target is allowed to be written.'
+        }
+    }
+    $shares=@(Get-CimInstance -ClassName Win32_Share -ErrorAction Stop | Where-Object { [string]$_.Name -ieq $shareName })
+    if ($shares.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$shares[0].Path)) {
+        throw 'Could not map a local network share to one filesystem path. No target is allowed to be written.'
+    }
+    $sharePath=[string]$shares[0].Path
+    if ($sharePath.StartsWith('\\',[StringComparison]::Ordinal)) {
+        throw 'A local network share did not resolve to a local filesystem path. No target is allowed to be written.'
+    }
+    $relative=''
+    if ($components.Count -gt 2) { $relative=[string]::Join('\',[string[]]$components[2..($components.Count-1)]) }
+    if ($relative) { $sharePath=[IO.Path]::Combine($sharePath,$relative) }
+    try { return [IO.Path]::GetFullPath($sharePath) }
+    catch { throw 'Could not map a local network share to a filesystem path. No target is allowed to be written.' }
+}
+function Assert-MRIPathReparseSafety {
+    param([string]$Path,[array]$Partitions)
+    $knownMountPaths=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($partition in $Partitions) {
+        foreach ($accessPath in @($partition.AccessPaths)) {
+            if ([string]::IsNullOrWhiteSpace([string]$accessPath)) { continue }
+            try { [void]$knownMountPaths.Add([IO.Path]::GetFullPath([string]$accessPath).TrimEnd([char[]]@('\','/'))) }
+            catch { throw 'Windows returned an invalid partition access path. No target is allowed to be written.' }
+        }
+    }
+    $volumeRoot=[regex]::Match($Path,'^\\\\\?\\Volume\{[0-9A-Fa-f-]+\}\\')
+    $root=$(if ($volumeRoot.Success) { $volumeRoot.Value } else { [IO.Path]::GetPathRoot($Path) })
+    if ([string]::IsNullOrWhiteSpace($root)) { throw 'Could not inspect a source or automation path. No target is allowed to be written.' }
+    $current=$root
+    $relative=$Path.Substring($root.Length)
+    foreach ($component in $relative.Split([char[]]@('\','/'),[StringSplitOptions]::RemoveEmptyEntries)) {
+        $current=[IO.Path]::Combine($current,$component)
+        if (-not [IO.File]::Exists($current) -and -not [IO.Directory]::Exists($current)) { break }
+        try { $item=Get-Item -LiteralPath $current -Force -ErrorAction Stop }
+        catch { throw 'Could not inspect a source or automation path for filesystem links. No target is allowed to be written.' }
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -and
+            -not $knownMountPaths.Contains($current.TrimEnd([char[]]@('\','/')))) {
+            throw 'A source or automation path passes through an unmapped filesystem link. No target is allowed to be written.'
+        }
+    }
+}
+function Resolve-MRIPathPartition {
+    param([string]$Path, [array]$Partitions)
+    if ([string]::IsNullOrWhiteSpace($Path)) { throw 'A source or automation path is empty. No target is allowed to be written.' }
+    try { $fullPath=[IO.Path]::GetFullPath($Path) }
+    catch { throw 'Could not resolve a source or automation path. No target is allowed to be written.' }
+    $fullPath=Resolve-MRIUNCPath $fullPath
+    if ($null -eq $fullPath) { return }
+    Assert-MRIPathReparseSafety $fullPath $Partitions
+    $fullPrefix=$fullPath.TrimEnd([char[]]@('\','/'))+[IO.Path]::DirectorySeparatorChar
+    $matches=[Collections.Generic.List[object]]::new()
+    foreach ($partition in $Partitions) {
+        $accessProperty=$partition.PSObject.Properties['AccessPaths']
+        if ($null -eq $accessProperty) { throw 'Windows did not report partition access paths. No target is allowed to be written.' }
+        foreach ($accessPath in @($accessProperty.Value)) {
+            if ([string]::IsNullOrWhiteSpace([string]$accessPath)) { continue }
+            $accessPrefix=([string]$accessPath).TrimEnd([char[]]@('\','/'))+[IO.Path]::DirectorySeparatorChar
+            if ($fullPrefix.StartsWith($accessPrefix,[StringComparison]::OrdinalIgnoreCase)) {
+                $matches.Add([pscustomobject]@{ DiskNumber=[int]$partition.DiskNumber; PrefixLength=$accessPrefix.Length })
+            }
+        }
+    }
+    if (-not $matches.Count) { throw 'Could not map a source or automation path to a local partition. No target is allowed to be written.' }
+    $longest=($matches | Measure-Object -Property PrefixLength -Maximum).Maximum
+    $diskNumbers=@($matches | Where-Object { $_.PrefixLength -eq $longest } | ForEach-Object { $_.DiskNumber } | Sort-Object -Unique)
+    if ($diskNumbers.Count -ne 1) { throw 'A source or automation path maps to multiple partitions. No target is allowed to be written.' }
+    # Several partitions on one disk may be returned for unrelated volumes.
+    # Path safety is enforced at the physical-disk level, so return the unique
+    # longest-prefix disk identity rather than requiring one partition per disk.
+    return [pscustomobject]@{DiskNumber=[int]$diskNumbers[0]}
+}
+function Get-MRIProtectedKeys {
+    param([string[]]$Paths, [array]$Inventory)
+    if (-not $Paths.Count) { return }
+    # AccessPaths includes volume GUID roots, drive letters, and mounted folders.
+    # A drive-letter-only lookup misses a USB volume mounted beneath another disk.
+    $partitions=@(Get-Partition -ErrorAction Stop)
+    if (-not $partitions.Count) { throw 'Windows did not report partitions for source resolution. No target is allowed to be written.' }
+    $protected=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($path in $Paths) {
+        $partition=Resolve-MRIPathPartition $path $partitions
+        if ($null -eq $partition) { continue } # A verified remote UNC path has no local disk to protect.
+        $diskNumber=[int]$partition.DiskNumber
+        $usbMatches=@($Inventory | Where-Object { $_.Number -eq $diskNumber })
+        if ($usbMatches.Count -gt 1) { throw 'A source or automation USB has ambiguous hardware identity. No target is allowed to be written.' }
+        if ($usbMatches.Count -eq 1) {
+            $drive=$usbMatches[0]
+            if ($drive.BusType -ne 'USB' -or [string]::IsNullOrWhiteSpace([string]$drive.Key)) {
+                throw 'A source or automation USB has no usable hardware identity. Use an internal source folder.'
+            }
+            [void]$protected.Add([string]$drive.Key)
+            continue
+        }
+        # Get-MRIInventory contains only USB disks with a physical identity row.
+        # If that inventory omitted the partition's USB disk, fail closed instead
+        # of treating an identity-query failure as an internal source disk.
+        $disk=@(Get-Disk -Number $diskNumber -ErrorAction Stop)
+        if ($disk.Count -ne 1) { throw 'Could not resolve a source or automation disk. No target is allowed to be written.' }
+        $busType=[string]$disk[0].BusType
+        if ($busType -ieq 'USB') {
+            throw 'A source or automation USB has no usable hardware identity. Use an internal source folder.'
+        }
+        if ([string]::IsNullOrWhiteSpace($busType) -or $busType -in @('Unknown','Virtual','File Backed Virtual','Storage Spaces')) {
+            throw 'Could not establish a physical disk identity for a source or automation path. No target is allowed to be written.'
+        }
+    }
+    foreach ($key in $protected) { $key }
+}
+function Get-MRIResolvedProtectedPaths {
+    param($Config,[string[]]$Paths,[string]$WorkPath,[string]$StatePath,[string]$ReceiptPath)
+    $candidates=[Collections.Generic.List[string]]::new()
+    foreach ($path in $Paths) { if (-not [string]::IsNullOrWhiteSpace($path)) { $candidates.Add($path) } }
+    foreach ($path in @($PSScriptRoot,$WorkPath,$StatePath,$ReceiptPath)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$path)) { $candidates.Add([string]$path) }
+    }
+    if ($null -ne $Config.PSObject.Properties['InputStamp'] -and $null -ne $Config.InputStamp -and
+        -not [string]::IsNullOrWhiteSpace([string]$Config.InputStamp.Path)) {
+        # ISO mounts and ZIP extraction caches are derived from this protected
+        # input. The ISO mount may be an optical volume with no disk partition;
+        # ZIP caches are under the protected DataPath supplied by the caller.
+        $candidates.Add([string]$Config.InputStamp.Path)
+    } elseif (-not [string]::IsNullOrWhiteSpace([string]$Config.SourcePath)) {
+        $candidates.Add([string]$Config.SourcePath)
+    }
+    $receiptDirectory=[IO.Path]::GetDirectoryName($ReceiptPath)
+    if ($receiptDirectory) {
+        $candidates.Add($receiptDirectory)
+        $dataDirectory=[IO.Path]::GetDirectoryName($receiptDirectory)
+        if ($dataDirectory) { $candidates.Add($dataDirectory) }
+    }
+    $resolved=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($path in $candidates) {
+        try { [void]$resolved.Add([IO.Path]::GetFullPath($path)) }
+        catch { throw 'Could not normalize a source, application, or working-data path. No target is allowed to be written.' }
+    }
+    if (-not $resolved.Count) { throw 'Protected source and working-data paths are required before a build. No target is allowed to be written.' }
+    foreach ($path in $resolved) { $path }
+}
+function Assert-MRIPathProtection {
+    param($Record, [string[]]$Paths)
+    if (-not $Paths.Count) { return }
+    $inventory=@(Get-MRIInventory)
+    if (@($inventory | Where-Object { $_.Key -eq $Record.Key }).Count -ne 1) {
+        throw 'The selected USB identity changed before preparation. No disk operation was started.'
+    }
+    $currentProtectedKeys=@(Get-MRIProtectedKeys $Paths $inventory)
+    if ($Record.Key -in $currentProtectedKeys) {
+        throw 'The selected disk now contains a source or automation path. No disk operation was started.'
     }
 }
 function Assert-MRIDrive {
@@ -545,7 +757,7 @@ function Get-MRISetupArguments {
     return '/d /s /c ""'+$batch+'"'+ $(if ($expanded.Count) { ' '+($expanded -join ' ') } else { '' }) +'"'
 }
 function Get-MRIWritableDisk {
-    param($Record,$Config,[string[]]$ProtectedKeys,[int]$ExpectedNumber,[string]$CancelPath)
+    param($Record,$Config,[string[]]$ProtectedKeys,[int]$ExpectedNumber,[string]$CancelPath,[string[]]$ProtectedPaths=@())
     Assert-MRINotCancelled $CancelPath
     $drive=Assert-MRIDrive $Record $Config $ProtectedKeys $ExpectedNumber
     $disk=Get-Disk -Number $drive.Number -ErrorAction Stop
@@ -556,24 +768,31 @@ function Get-MRIWritableDisk {
     $key=Get-MRIDriveKey $serial ([string]$hardware[0].PNPDeviceID) ([string]$disk.FriendlyName) ([long]$disk.Size)
     if ($key -ne $Record.Key -or $disk.Number -ne $ExpectedNumber -or [string]$disk.BusType -ne 'USB' -or
         $disk.IsBoot -or $disk.IsSystem -or $disk.IsOffline -or $disk.IsReadOnly) { throw 'The storage object changed or is protected. No disk operation was started.' }
+    Assert-MRIPathProtection $Record $ProtectedPaths
     Assert-MRINotCancelled $CancelPath
     return $disk
 }
 function Initialize-MRITarget {
-    param($Record, $Config, [string[]]$ProtectedKeys, [int]$ExpectedNumber,[string]$CancelPath='')
+    param($Record, $Config, [string[]]$ProtectedKeys, [int]$ExpectedNumber,[string]$CancelPath='',[string[]]$ProtectedPaths=@())
     if (-not $Record.AllowErase) { throw 'This drive was not individually enrolled for automatic erasure.' }
-    $actual=Get-MRIWritableDisk $Record $Config $ProtectedKeys $ExpectedNumber $CancelPath
+    if (-not $ProtectedPaths.Count) { throw 'Protected source and working-data paths are required before disk preparation.' }
+    $actual=Get-MRIWritableDisk $Record $Config $ProtectedKeys $ExpectedNumber $CancelPath $ProtectedPaths
     if ([string]$actual.PartitionStyle -ne 'RAW') {
-        Clear-Disk -InputObject $actual -RemoveData -RemoveOEM -Confirm:$false -ErrorAction Stop
+        # Re-resolve every protected path after checking the target identity and
+        # immediately before the first destructive storage command.
+        $actual=Get-MRIWritableDisk $Record $Config $ProtectedKeys $ExpectedNumber $CancelPath $ProtectedPaths
+        if ([string]$actual.PartitionStyle -ne 'RAW') {
+            Clear-Disk -InputObject $actual -RemoveData -RemoveOEM -Confirm:$false -ErrorAction Stop
+        }
     }
-    $actual=Get-MRIWritableDisk $Record $Config $ProtectedKeys $ExpectedNumber $CancelPath
+    $actual=Get-MRIWritableDisk $Record $Config $ProtectedKeys $ExpectedNumber $CancelPath $ProtectedPaths
     if ([string]$actual.PartitionStyle -eq 'RAW') { $actual=Initialize-Disk -InputObject $actual -PartitionStyle MBR -PassThru -ErrorAction Stop }
-    $actual=Get-MRIWritableDisk $Record $Config $ProtectedKeys $ExpectedNumber $CancelPath
+    $actual=Get-MRIWritableDisk $Record $Config $ProtectedKeys $ExpectedNumber $CancelPath $ProtectedPaths
     # Stay below the Windows FAT32 format limit and the hardware's usable capacity.
     $size=[long][Math]::Min(32000000000,($actual.Size-2MB))
     $needsLetter=-not [string]::IsNullOrWhiteSpace($Config.SetupBatch)
     $part=New-Partition -InputObject $actual -Size $size -IsActive -AssignDriveLetter:$needsLetter -ErrorAction Stop
-    [void](Get-MRIWritableDisk $Record $Config $ProtectedKeys $ExpectedNumber $CancelPath)
+    [void](Get-MRIWritableDisk $Record $Config $ProtectedKeys $ExpectedNumber $CancelPath $ProtectedPaths)
     $part | Format-Volume -FileSystem FAT32 -NewFileSystemLabel $Record.Label -Force -Confirm:$false -ErrorAction Stop | Out-Null
     return Get-MRITargetVolume (Assert-MRIDrive $Record $Config $ProtectedKeys $ExpectedNumber) -RequireDriveLetter $needsLetter
 }
@@ -601,15 +820,15 @@ function Test-MRILegacyDirectReceipt {
 function Start-MRIBuildJob {
     param([string]$ModulePath,$Record,[string]$ConfigPath,[string]$ConfigHash,[string]$ManifestPath,[string]$ManifestHash,
         [string[]]$ProtectedKeys,[string]$StatePath,[string]$ReceiptPath,[string]$WorkPath,[string]$CancelPath,
-        [Nullable[int]]$ApprovedEraseNumber=$null)
+        [Nullable[int]]$ApprovedEraseNumber=$null,[string[]]$ProtectedPaths=@())
     return Start-Job -ScriptBlock {
-        param($module,$record,$snapshot,$configHash,$manifestPath,$manifestHash,$protected,$statePath,$receiptPath,$work,$cancel,$approvedNumber)
+        param($module,$record,$snapshot,$configHash,$manifestPath,$manifestHash,$protected,$protectedPaths,$statePath,$receiptPath,$work,$cancel,$approvedNumber)
         $ErrorActionPreference='Stop'
         Import-Module $module -Force -DisableNameChecking
         $config=Read-MRIAuthenticatedJson $snapshot $configHash
         $manifest=Read-MRIAuthenticatedJson $manifestPath $manifestHash
-        Invoke-MRIBuild $record $config $manifest @($protected) $statePath $receiptPath $work $cancel -ApprovedEraseNumber $approvedNumber
-    } -ArgumentList $ModulePath,$Record,$ConfigPath,$ConfigHash,$ManifestPath,$ManifestHash,$ProtectedKeys,$StatePath,$ReceiptPath,$WorkPath,$CancelPath,$ApprovedEraseNumber
+        Invoke-MRIBuild $record $config $manifest @($protected) $statePath $receiptPath $work $cancel -ApprovedEraseNumber $approvedNumber -ProtectedPaths @($protectedPaths)
+    } -ArgumentList $ModulePath,$Record,$ConfigPath,$ConfigHash,$ManifestPath,$ManifestHash,$ProtectedKeys,$ProtectedPaths,$StatePath,$ReceiptPath,$WorkPath,$CancelPath,$ApprovedEraseNumber
 }
 function Select-MRIBuilds {
     param([array]$Arrivals,[hashtable]$Jobs,[int]$MaxParallel)
@@ -625,12 +844,13 @@ function Select-MRIBuilds {
 function Invoke-MRIBuild {
     param($Record, $Config, $SourceManifest, [string[]]$ProtectedKeys, [string]$StatePath,
         [string]$ReceiptPath, [string]$WorkPath, [string]$CancelPath,
-        [Nullable[int]]$ApprovedEraseNumber=$null)
+        [Nullable[int]]$ApprovedEraseNumber=$null,[string[]]$ProtectedPaths=@())
     $target=$null; $number=$null; $newReceipt=$false
     try {
         Assert-MRINotCancelled $CancelPath
         Assert-MRIConfig $Config
         if ((Get-MRISourceKind $Config) -ne 'Folder') { throw 'Open the ISO/ZIP source before starting a drive build.' }
+        $ProtectedPaths=@(Get-MRIResolvedProtectedPaths $Config $ProtectedPaths $WorkPath $StatePath $ReceiptPath)
         Initialize-MRINative
         [void][IO.Directory]::CreateDirectory($WorkPath)
         Set-MRIState $StatePath $Record 'CHECKING'
@@ -699,7 +919,7 @@ function Invoke-MRIBuild {
             if ($receipt) { Write-MRIJson (Join-Path $WorkPath 'previous-receipt.json') $receipt }
             # A failed fresh build must never leave a stale READY receipt.
             if ([IO.File]::Exists($ReceiptPath)) { [IO.File]::Delete($ReceiptPath) }; $receipt=$null
-            $target=Initialize-MRITarget $Record $Config $ProtectedKeys $number $CancelPath
+            $target=Initialize-MRITarget $Record $Config $ProtectedKeys $number $CancelPath $ProtectedPaths
         } else {
             # Copy-only mode never overwrites nonempty media for a different source/recipe.
             $contents=Get-MRIManifest $target.Path -IgnoreSystemDirectories -NoHash

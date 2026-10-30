@@ -2,6 +2,7 @@ name: Rust USB selection safety (offline parity)
 on:
   push:
     paths:
+      - 'rust-toolchain.toml'
       - 'rust/mri-safety/**'
       - 'MRI.Batch.psm1'
       - 'tests/RustSelectionParity.ps1'
@@ -13,6 +14,11 @@ on:
 permissions:
   contents: read
 
+# Cancel superseded runs per event; keep push and pull_request checks independent.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}-${{ (github.event_name == 'workflow_dispatch' || github.run_attempt != '1') && github.run_id || 'automatic' }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' && github.run_attempt == '1' }}
+
 jobs:
   rust-selection:
     runs-on: windows-latest
@@ -22,10 +28,16 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+      - name: Install Rust format and lint components
+        run: rustup component add rustfmt clippy
+      - name: Verify Rust selection policy formatting
+        run: cargo fmt --manifest-path rust/mri-safety/Cargo.toml -- --check
+      - name: Enforce strict Rust selection policy lints
+        run: cargo clippy --locked --manifest-path rust/mri-safety/Cargo.toml --all-targets -- -D warnings
       - name: Rust unit and 100-case policy self-tests
-        run: cargo test --manifest-path rust/mri-safety/Cargo.toml
+        run: cargo test --locked --manifest-path rust/mri-safety/Cargo.toml
       - name: Build isolated read-only selection executable
-        run: cargo build --manifest-path rust/mri-safety/Cargo.toml
+        run: cargo build --locked --manifest-path rust/mri-safety/Cargo.toml
       - name: Compare Rust to original PowerShell with disposable inventories
         shell: powershell
         run: ./tests/RustSelectionParity.ps1

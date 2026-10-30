@@ -2,16 +2,23 @@ name: Rust MRI manifest versus original PowerShell parity
 on:
   push:
     paths:
+      - 'rust-toolchain.toml'
       - 'rust/mri-manifest/**'
       - 'MRI.Batch.psm1'
       - 'tests/RustManifestParity.ps1'
       - 'tests/RustManifestMatchParity.ps1'
+      - 'tests/RustContentsSafeParity.ps1'
       - '.github/workflows/rust-manifest.yml'
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
+
+# Cancel superseded runs per event; keep push and pull_request checks independent.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}-${{ (github.event_name == 'workflow_dispatch' || github.run_attempt != '1') && github.run_id || 'automatic' }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' && github.run_attempt == '1' }}
 
 jobs:
   read-only-media-manifest:
@@ -23,16 +30,19 @@ jobs:
         with:
           persist-credentials: false
       - name: Run Rust source-tree manifest self tests
-        run: cargo test --manifest-path rust/mri-manifest/Cargo.toml
+        run: cargo test --locked --manifest-path rust/mri-manifest/Cargo.toml
       - name: Require canonical Rust formatting
         run: cargo fmt --manifest-path rust/mri-manifest/Cargo.toml -- --check
       - name: Require strict Rust lint checks
-        run: cargo clippy --manifest-path rust/mri-manifest/Cargo.toml --all-targets -- -D warnings
+        run: cargo clippy --locked --manifest-path rust/mri-manifest/Cargo.toml --all-targets -- -D warnings
       - name: Build read-only Rust manifest CLI
-        run: cargo build --manifest-path rust/mri-manifest/Cargo.toml
+        run: cargo build --locked --manifest-path rust/mri-manifest/Cargo.toml
       - name: Compare 400 synthetic manifests with real Get-MRIManifest
         shell: powershell
         run: ./tests/RustManifestParity.ps1
       - name: Compare 600 final-manifest match decisions with real Assert-MRIManifestMatch
         shell: powershell
         run: ./tests/RustManifestMatchParity.ps1
+      - name: Compare 780 existing-media receipt safety decisions with original PowerShell
+        shell: powershell
+        run: ./tests/RustContentsSafeParity.ps1

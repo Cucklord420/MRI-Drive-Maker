@@ -136,14 +136,14 @@ try {
     Test-Source 'A replacement reusing the displayed disk number is blocked before erasure' {
         $guardSim.Disk.SerialNumber='REPLACEMENT'
         $caught=$false
-        try { Initialize-MRITarget $record $cfg @() 6 '' | Out-Null } catch { $caught=$_.Exception.Message -match 'changed or is protected' }
+        try { Initialize-MRITarget $record $cfg @() 6 '' @($cfg.SourcePath,$PSScriptRoot,$temp) | Out-Null } catch { $caught=$_.Exception.Message -match 'changed or is protected' }
         Check $caught; Check ($guardSim.Writes -eq 0)
         $guardSim.Disk.SerialNumber='TEST-A'
     }
     Test-Source 'A fresh non-USB storage object is blocked even when inventory says USB' {
         $guardSim.Disk.BusType='SATA'
         $caught=$false
-        try { Initialize-MRITarget $record $cfg @() 6 '' | Out-Null } catch { $caught=$_.Exception.Message -match 'changed or is protected' }
+        try { Initialize-MRITarget $record $cfg @() 6 '' @($cfg.SourcePath,$PSScriptRoot,$temp) | Out-Null } catch { $caught=$_.Exception.Message -match 'changed or is protected' }
         Check $caught; Check ($guardSim.Writes -eq 0)
         $guardSim.Disk.BusType='USB'
     }

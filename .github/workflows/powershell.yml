@@ -20,6 +20,11 @@ on:
 permissions:
   contents: read
 
+# Cancel superseded runs per event; keep push and pull_request checks independent.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}-${{ (github.event_name == 'workflow_dispatch' || github.run_attempt != '1') && github.run_id || 'automatic' }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' && github.run_attempt == '1' }}
+
 jobs:
   windows-powershell:
     name: Windows PowerShell 5.1
@@ -54,6 +59,11 @@ jobs:
         run: |
           & ./tests/SourceSmoke.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify source and automation paths resolve to protected physical disks
+        shell: powershell
+        run: |
+          & ./tests/ProtectedPathSmoke.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify ISO mounting and the real storage backend on an owned VHD
         shell: powershell
         run: |
@@ -70,13 +80,13 @@ jobs:
         shell: powershell
         run: |
           $archive=Join-Path $env:RUNNER_TEMP 'MRI-Drive-Maker-candidate.zip'
-          cargo run --quiet --manifest-path rust/mri-release/Cargo.toml -- --output $archive
+          cargo run --quiet --locked --manifest-path rust/mri-release/Cargo.toml -- --output $archive
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & ./tests/PackageSmoke.ps1 -ArchivePath $archive
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $published='./downloads/MRI-Drive-Maker-v0.3.0.zip'
           if (Test-Path -LiteralPath $published) {
-            cargo run --quiet --manifest-path rust/mri-release/Cargo.toml -- --verify $published
+            cargo run --quiet --locked --manifest-path rust/mri-release/Cargo.toml -- --verify $published
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             & ./tests/PackageSmoke.ps1 -ArchivePath $published
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
