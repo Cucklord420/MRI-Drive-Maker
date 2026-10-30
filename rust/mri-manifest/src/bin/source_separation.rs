@@ -136,7 +136,13 @@ try {
                 "CacheDirectory": cache_text
             }));
             let output = std::process::Command::new("powershell.exe")
-                .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script])
+                .args([
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    script,
+                ])
                 .env("MRI_BATCH_MODULE", &module)
                 .env("MRI_SOURCE", source)
                 .env("MRI_APP", app_root)
