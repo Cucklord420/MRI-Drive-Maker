@@ -88,4 +88,68 @@ mod tests {
             .is_ok()
         );
     }
+
+    #[cfg(windows)]
+    #[test]
+    fn matches_original_powershell_on_synthetic_existing_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = temp.path().join("automation");
+        let cache = app.join("Data").join("Sources");
+        let cache_source = cache.join("unpacked");
+        let outside = temp.path().join("official MRI source");
+        let unowned = app.join("unowned");
+        std::fs::create_dir_all(&cache_source).unwrap();
+        std::fs::create_dir_all(&unowned).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+
+        let module = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../MRI.Batch.psm1");
+        assert!(module.is_file());
+        let script = r#"
+$ErrorActionPreference = 'Stop'
+try {
+    Import-Module -Name $env:MRI_BATCH_MODULE -Force -DisableNameChecking -ErrorAction Stop | Out-Null
+    $context = [pscustomobject]@{
+        Path = $env:MRI_SOURCE
+        CacheDirectory = $env:MRI_CACHE
+    }
+    Assert-MRISourceSeparation -Context $context -ApplicationPath $env:MRI_APP
+    exit 0
+} catch {
+    [Console]::Error.Write($_.Exception.Message)
+    exit 1
+}
+"#;
+        let cases = [
+            (&outside, &app, None),
+            (&unowned, &app, None),
+            (&cache_source, &app, None),
+            (&cache_source, &app, Some(cache.as_path())),
+            (&cache_source, &app, Some(outside.as_path())),
+            (&app, &app, None),
+            (&app, &unowned, None),
+        ];
+        for (source, app_root, cache_root) in cases {
+            let cache_text = cache_root.map_or("", |path| path.to_str().unwrap());
+            let rust = policy(&json!({
+                "SourcePath": source,
+                "ApplicationPath": app_root,
+                "CacheDirectory": cache_text
+            }));
+            let output = std::process::Command::new("powershell.exe")
+                .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script])
+                .env("MRI_BATCH_MODULE", &module)
+                .env("MRI_SOURCE", source)
+                .env("MRI_APP", app_root)
+                .env("MRI_CACHE", cache_text)
+                .output()
+                .expect("Windows PowerShell 5.1 is required for source-separation parity");
+            assert_eq!(
+                rust.is_ok(),
+                output.status.success(),
+                "source={source:?} app={app_root:?} cache={cache_root:?} Rust={rust:?}, PowerShell exit={:?}, stderr={:?}",
+                output.status.code(),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
 }
