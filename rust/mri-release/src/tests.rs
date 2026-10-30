@@ -1236,7 +1236,10 @@ fn zip64_entry_count_preflight_supports_prepended_archives() {
     let mut metadata_reader = Cursor::new(bytes.clone());
     let directory = zip64_directory(&mut metadata_reader, archive_len - 22)
         .expect("the ZIP64 locator must resolve to its end record");
-    assert_eq!(directory.archive_prefix, b"synthetic ZIP prefix".len() as u64);
+    assert_eq!(
+        directory.archive_prefix,
+        b"synthetic ZIP prefix".len() as u64
+    );
     let directory_start = directory.directory_offset + directory.archive_prefix;
     assert_eq!(
         directory_start + directory.directory_size,
