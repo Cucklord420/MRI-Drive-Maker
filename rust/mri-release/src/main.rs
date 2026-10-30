@@ -336,6 +336,48 @@ struct Zip64Directory {
     eocd_offset: u64,
 }
 
+struct PreflightReader<'a, R> {
+    inner: &'a mut R,
+    bytes_remaining: u64,
+    exceeded: bool,
+}
+
+impl<'a, R> PreflightReader<'a, R> {
+    fn new(inner: &'a mut R, max_bytes: u64) -> Self {
+        Self {
+            inner,
+            bytes_remaining: max_bytes,
+            exceeded: false,
+        }
+    }
+}
+
+impl<R: Read> Read for PreflightReader<'_, R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        if self.bytes_remaining == 0 {
+            self.exceeded = true;
+            return Err(std::io::Error::other(
+                "ZIP metadata preflight read budget exceeded",
+            ));
+        }
+        let allowed = buffer
+            .len()
+            .min(usize::try_from(self.bytes_remaining).unwrap_or(usize::MAX));
+        let read = self.inner.read(&mut buffer[..allowed])?;
+        self.bytes_remaining -= read as u64;
+        Ok(read)
+    }
+}
+
+impl<R: Seek> Seek for PreflightReader<'_, R> {
+    fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(position)
+    }
+}
+
 fn zip64_directory_at<R: Read + Seek>(
     reader: &mut R,
     zip64_offset: u64,
@@ -357,8 +399,16 @@ fn zip64_directory_at<R: Read + Seek>(
     let entries_total = u64::from_le_bytes(zip64_eocd[32..40].try_into().ok()?);
     let directory_size = u64::from_le_bytes(zip64_eocd[40..48].try_into().ok()?);
     let directory_offset = u64::from_le_bytes(zip64_eocd[48..56].try_into().ok()?);
+    if entries_on_disk > entries_total
+        || zip64_offset
+            < entries_total
+                .saturating_mul(46)
+                .saturating_add(directory_offset)
+    {
+        return None;
+    }
     Some(Zip64Directory {
-        entry_count: entries_on_disk.max(entries_total),
+        entry_count: entries_total,
         directory_size,
         directory_offset,
         archive_prefix,
@@ -382,20 +432,25 @@ fn zip64_directory<R: Read + Seek>(reader: &mut R, eocd_offset: u64) -> Option<Z
         return Some(directory);
     }
 
-    // The locator offset is archive-relative. Search backwards for the actual record when the
-    // ZIP has a self-extracting prefix, while keeping the scan buffer fixed and small.
+    // zip-rs searches forward from the locator's archive-relative offset. Keep the same direction
+    // so a signature inside the ZIP64 extensible sector cannot replace the record zip-rs selects.
+    let last_candidate = locator_offset.checked_sub(56)?;
+    let search_end = last_candidate.checked_add(1)?;
+    if relative_offset >= search_end {
+        return None;
+    }
     let mut buffer = [0_u8; BUFFER_BYTES];
-    let mut range_end = locator_offset;
-    while range_end != 0 {
-        let range_start = range_end.saturating_sub(BUFFER_BYTES as u64);
-        let range_len = usize::try_from(range_end - range_start).ok()?;
+    let mut range_start = relative_offset;
+    while range_start < search_end {
+        let range_len =
+            usize::try_from((search_end - range_start).min(BUFFER_BYTES as u64)).ok()?;
         read_exact_at(reader, range_start, &mut buffer[..range_len]).ok()?;
         if range_len >= 4 {
-            for index in (0..=range_len - 4).rev() {
+            for index in 0..=range_len - 4 {
                 if buffer[index..index + 4] != *b"PK\x06\x06" {
                     continue;
                 }
-                let candidate = range_start + index as u64;
+                let candidate = range_start.checked_add(index as u64)?;
                 if let Some(directory) =
                     zip64_directory_at(reader, candidate, locator_offset, relative_offset)
                 {
@@ -403,10 +458,10 @@ fn zip64_directory<R: Read + Seek>(reader: &mut R, eocd_offset: u64) -> Option<Z
                 }
             }
         }
-        if range_start == 0 {
+        if range_len <= 3 {
             break;
         }
-        range_end = range_start + 3;
+        range_start = range_start.checked_add((range_len - 3) as u64)?;
     }
     None
 }
@@ -437,67 +492,55 @@ fn find_central_directory_start<R: Read + Seek>(
     None
 }
 
-fn central_entries_are_readable<R: Read + Seek>(
+fn central_directory_entry_count<R: Read + Seek>(
     reader: &mut R,
     mut position: u64,
     directory_end: u64,
-    count: usize,
-) -> bool {
-    for _ in 0..count {
-        if position
-            .checked_add(46)
-            .is_none_or(|end| end > directory_end)
-        {
-            return false;
+    max_entries: usize,
+) -> Option<usize> {
+    let mut count = 0_usize;
+    while position < directory_end {
+        if position.checked_add(4)? > directory_end {
+            return None;
         }
-        let mut header = [0_u8; 46];
-        if read_exact_at(reader, position, &mut header).is_err() || header[..4] != *b"PK\x01\x02" {
-            return false;
+        let mut signature = [0_u8; 4];
+        read_exact_at(reader, position, &mut signature).ok()?;
+        if signature == *b"PK\x01\x02" {
+            if position.checked_add(46)? > directory_end {
+                return None;
+            }
+            let mut rest = [0_u8; 42];
+            read_exact_at(reader, position.checked_add(4)?, &mut rest).ok()?;
+            let name_len = u16::from_le_bytes([rest[24], rest[25]]) as u64;
+            let extra_len = u16::from_le_bytes([rest[26], rest[27]]) as u64;
+            let comment_len = u16::from_le_bytes([rest[28], rest[29]]) as u64;
+            position = position
+                .checked_add(46)?
+                .checked_add(name_len)?
+                .checked_add(extra_len)?
+                .checked_add(comment_len)?;
+            if position > directory_end {
+                return None;
+            }
+            count = count.checked_add(1)?;
+            if count > max_entries {
+                return Some(count);
+            }
+        } else if signature == *b"PK\x05\x05" {
+            if position.checked_add(6)? > directory_end {
+                return None;
+            }
+            let mut signature_len = [0_u8; 2];
+            read_exact_at(reader, position.checked_add(4)?, &mut signature_len).ok()?;
+            let next = position
+                .checked_add(6)?
+                .checked_add(u16::from_le_bytes(signature_len) as u64)?;
+            return (next == directory_end).then_some(count);
+        } else {
+            return None;
         }
-        let name_len = u16::from_le_bytes([header[28], header[29]]) as u64;
-        let extra_len = u16::from_le_bytes([header[30], header[31]]) as u64;
-        let comment_len = u16::from_le_bytes([header[32], header[33]]) as u64;
-        let Some(next) = position
-            .checked_add(46)
-            .and_then(|value| value.checked_add(name_len))
-            .and_then(|value| value.checked_add(extra_len))
-            .and_then(|value| value.checked_add(comment_len))
-        else {
-            return false;
-        };
-        if next > directory_end {
-            return false;
-        }
-        position = next;
     }
-    true
-}
-
-fn over_limit_central_directory_is_present<R: Read + Seek>(
-    reader: &mut R,
-    relative_offset: u64,
-    directory_size: u64,
-    archive_prefix: Option<u64>,
-    directory_limit: u64,
-    needed_entries: usize,
-) -> bool {
-    let start = if let Some(prefix) = archive_prefix {
-        let Some(start) = relative_offset.checked_add(prefix) else {
-            return false;
-        };
-        start
-    } else if let Some(start) =
-        find_central_directory_start(reader, relative_offset, directory_limit)
-    {
-        start
-    } else {
-        return false;
-    };
-    let Some(directory_end) = start.checked_add(directory_size) else {
-        return false;
-    };
-    directory_end <= directory_limit
-        && central_entries_are_readable(reader, start, directory_end, needed_entries)
+    Some(count)
 }
 
 fn preflight_zip_entry_count<R: Read + Seek>(
@@ -516,11 +559,25 @@ fn preflight_zip_entry_count<R: Read + Seek>(
     let tail_len = usize::try_from(archive_bytes.min(EOCD_TAIL_BYTES))
         .map_err(|_| "ZIP end-record window does not fit in memory")?;
     let tail_offset = archive_bytes - tail_len as u64;
+    let record_read_budget = u64::try_from(max_entries.saturating_add(1))
+        .unwrap_or(u64::MAX)
+        .saturating_mul(46)
+        .saturating_mul(2);
+    let max_read_bytes = archive_bytes
+        .saturating_add(tail_len as u64)
+        .saturating_add(record_read_budget);
+    let mut bounded_reader = PreflightReader::new(reader, max_read_bytes);
     let mut tail = Vec::new();
     tail.try_reserve_exact(tail_len)
         .map_err(|error| format!("Cannot reserve ZIP end-record window: {error}"))?;
     tail.resize(tail_len, 0);
-    read_exact_at(reader, tail_offset, &mut tail).map_err(|error| error.to_string())?;
+    read_exact_at(&mut bounded_reader, tail_offset, &mut tail).map_err(|error| {
+        if bounded_reader.exceeded {
+            "ZIP metadata preflight exceeded its bounded read budget".to_owned()
+        } else {
+            error.to_string()
+        }
+    })?;
 
     let mut found_eocd = false;
     for position in (0..=tail_len - EOCD_FIXED_BYTES).rev() {
@@ -546,6 +603,7 @@ fn preflight_zip_entry_count<R: Read + Seek>(
             tail[position + 18],
             tail[position + 19],
         ]) as u64;
+        found_eocd = true;
         let zip64 = entries_on_disk == u16::MAX as u64
             || entries_total == u16::MAX as u64
             || directory_size == u32::MAX as u64
@@ -553,24 +611,17 @@ fn preflight_zip_entry_count<R: Read + Seek>(
         let (declared_entries, directory_size, directory_offset, archive_prefix, directory_limit) =
             if zip64 {
                 let eocd_offset = tail_offset + position as u64;
-                let Some(directory) = zip64_directory(reader, eocd_offset) else {
-                    let fallback_entries = entries_on_disk.max(entries_total);
-                    if fallback_entries > max_entries as u64
-                        && directory_size != u32::MAX as u64
-                        && directory_offset != u32::MAX as u64
-                        && over_limit_central_directory_is_present(
-                            reader,
-                            directory_offset,
-                            directory_size,
-                            None,
-                            eocd_offset,
-                            max_entries.saturating_add(1),
-                        )
-                    {
-                        return Err(format!("ZIP entry count exceeds {max_entries}"));
+                let Some(directory) = zip64_directory(&mut bounded_reader, eocd_offset) else {
+                    if bounded_reader.exceeded {
+                        return Err(
+                            "ZIP metadata preflight exceeded its bounded read budget".into()
+                        );
                     }
                     continue;
                 };
+                if bounded_reader.exceeded {
+                    return Err("ZIP metadata preflight exceeded its bounded read budget".into());
+                }
                 (
                     directory.entry_count,
                     directory.directory_size,
@@ -587,24 +638,51 @@ fn preflight_zip_entry_count<R: Read + Seek>(
                     tail_offset + position as u64,
                 )
             };
-        found_eocd = true;
-        if declared_entries > max_entries as u64 {
-            let needed_entries = max_entries.saturating_add(1);
-            if over_limit_central_directory_is_present(
-                reader,
+
+        let start = if let Some(prefix) = archive_prefix {
+            directory_offset.checked_add(prefix)
+        } else if declared_entries == 0 && directory_size == 0 {
+            Some(directory_limit)
+        } else {
+            let start = find_central_directory_start(
+                &mut bounded_reader,
                 directory_offset,
-                directory_size,
-                archive_prefix,
                 directory_limit,
-                needed_entries,
-            ) {
-                return Err(format!("ZIP entry count exceeds {max_entries}"));
+            );
+            if bounded_reader.exceeded {
+                return Err("ZIP metadata preflight exceeded its bounded read budget".into());
             }
+            start
+        };
+        let Some(start) = start else {
+            continue;
+        };
+        let Some(end) = start.checked_add(directory_size) else {
+            continue;
+        };
+        if end != directory_limit {
+            continue;
+        }
+        let actual_entries =
+            central_directory_entry_count(&mut bounded_reader, start, end, max_entries);
+        if bounded_reader.exceeded {
+            return Err("ZIP metadata preflight exceeded its bounded read budget".into());
+        }
+        let Some(actual_entries) = actual_entries else {
+            continue;
+        };
+        if actual_entries > max_entries {
+            return Err(format!("ZIP entry count exceeds {max_entries}"));
+        }
+        if actual_entries as u64 == declared_entries {
+            return Ok(());
         }
     }
 
-    if found_eocd {
-        Ok(())
+    if bounded_reader.exceeded {
+        Err("ZIP metadata preflight exceeded its bounded read budget".into())
+    } else if found_eocd {
+        Err("ZIP central-directory entry count does not match its end record".into())
     } else {
         Err("ZIP lacks a valid end-of-central-directory record".into())
     }
