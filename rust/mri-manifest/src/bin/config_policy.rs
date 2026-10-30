@@ -329,4 +329,91 @@ mod tests {
             assert!(policy(&v).is_err(), "array {field}");
         }
     }
+
+    #[cfg(windows)]
+    #[test]
+    fn matches_original_powershell_for_shared_configuration_guards() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("synthetic MRI source");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::write(source.join("setup.cmd"), b"@echo off\r\n").unwrap();
+
+        let module = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../MRI.Batch.psm1");
+        assert!(module.is_file());
+
+        let script = r#"
+$ErrorActionPreference = 'Stop'
+try {
+    Import-Module -Name $env:MRI_BATCH_MODULE -Force -DisableNameChecking -ErrorAction Stop | Out-Null
+    $config = $env:MRI_CONFIG_JSON | ConvertFrom-Json
+    Assert-MRIConfig -Config $config
+    exit 0
+} catch {
+    [Console]::Error.Write($_.Exception.Message)
+    exit 1
+}
+"#;
+
+        let mut valid = base();
+        valid["SourcePath"] = json!(source.to_str().unwrap());
+        let mut cases: Vec<(&str, Value, bool)> =
+            vec![("existing source folder", valid.clone(), true)];
+
+        let mut value = valid.clone();
+        value["SourceKind"] = json!("folder");
+        value["FileSystem"] = json!("fat32");
+        cases.push(("case-insensitive enums", value, true));
+
+        let mut value = valid.clone();
+        value["SetupBatch"] = json!("setup.cmd");
+        value["SetupArguments"] = json!(["/drive={DriveLetter}"]);
+        value["MutableFiles"] = json!(["bootmgr"]);
+        cases.push(("existing setup batch", value, true));
+
+        for (label, field, invalid) in [
+            ("invalid parallel maximum", "MaxParallel", json!(31)),
+            ("invalid polling interval", "PollSeconds", json!(0)),
+            ("invalid stable count", "StablePolls", json!(1)),
+            ("invalid filesystem", "FileSystem", json!("exFAT")),
+            ("invalid boolean type", "SerializeSetup", json!("yes")),
+            ("invalid capacity", "MinimumDiskBytes", json!(0)),
+            ("invalid timeout", "CopyTimeoutSeconds", json!(0)),
+            ("invalid source kind", "SourceKind", json!("WIM")),
+            ("invalid required path", "RequiredFiles", json!(["../outside"])),
+            ("invalid setup path", "SetupBatch", json!("../outside.cmd")),
+        ] {
+            let mut value = valid.clone();
+            value[field] = invalid;
+            cases.push((label, value, false));
+        }
+
+        let mut missing = valid.clone();
+        missing.as_object_mut().unwrap().remove("SchemaVersion");
+        cases.push(("missing required schema", missing, false));
+
+        for (label, input, expected) in cases {
+            let rust = policy(&input);
+            let output = std::process::Command::new("powershell.exe")
+                .args([
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    script,
+                ])
+                .env("MRI_BATCH_MODULE", &module)
+                .env("MRI_CONFIG_JSON", input.to_string())
+                .output()
+                .expect("Windows PowerShell 5.1 is required for direct differential tests");
+            assert_eq!(rust.is_ok(), expected, "Rust policy for {label}: {rust:?}");
+            assert_eq!(
+                output.status.success(),
+                expected,
+                "PowerShell policy for {label}: status={:?}, stderr={:?}",
+                output.status.code(),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
 }
