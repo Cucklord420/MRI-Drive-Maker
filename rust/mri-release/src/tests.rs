@@ -1,5 +1,6 @@
 use super::*;
 use std::ffi::OsString;
+use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::process::Command;
 
 fn test_environment(overrides: &[(&str, String)]) -> Vec<(OsString, OsString)> {
@@ -404,6 +405,108 @@ fn write_test_archive(path: &Path, entries: &[TestEntry]) {
                     .add_symlink(entry.name.as_str(), target, options)
                     .unwrap();
             }
+        }
+    }
+    archive.finish().unwrap();
+}
+
+fn prepend_zip_prefix_and_upgrade_to_zip64(zip32: &[u8]) -> Vec<u8> {
+    let eocd = zip32.len() - 22;
+    let entry_count = u16::from_le_bytes([zip32[eocd + 10], zip32[eocd + 11]]) as u64;
+    let directory_size = u32::from_le_bytes(zip32[eocd + 12..eocd + 16].try_into().unwrap()) as u64;
+    let directory_offset =
+        u32::from_le_bytes(zip32[eocd + 16..eocd + 20].try_into().unwrap()) as u64;
+    let mut archive = zip32[..eocd].to_vec();
+    let zip64_eocd_offset = eocd as u64;
+    archive.extend_from_slice(b"PK\x06\x06");
+    archive.extend_from_slice(&44_u64.to_le_bytes());
+    archive.extend_from_slice(&45_u16.to_le_bytes());
+    archive.extend_from_slice(&45_u16.to_le_bytes());
+    archive.extend_from_slice(&0_u32.to_le_bytes());
+    archive.extend_from_slice(&0_u32.to_le_bytes());
+    archive.extend_from_slice(&entry_count.to_le_bytes());
+    archive.extend_from_slice(&entry_count.to_le_bytes());
+    archive.extend_from_slice(&directory_size.to_le_bytes());
+    archive.extend_from_slice(&directory_offset.to_le_bytes());
+    archive.extend_from_slice(b"PK\x06\x07");
+    archive.extend_from_slice(&0_u32.to_le_bytes());
+    archive.extend_from_slice(&zip64_eocd_offset.to_le_bytes());
+    archive.extend_from_slice(&1_u32.to_le_bytes());
+    archive.extend_from_slice(b"PK\x05\x06");
+    archive.extend_from_slice(&0_u16.to_le_bytes());
+    archive.extend_from_slice(&0_u16.to_le_bytes());
+    archive.extend_from_slice(&u16::MAX.to_le_bytes());
+    archive.extend_from_slice(&u16::MAX.to_le_bytes());
+    archive.extend_from_slice(&u32::MAX.to_le_bytes());
+    archive.extend_from_slice(&u32::MAX.to_le_bytes());
+    archive.extend_from_slice(&0_u16.to_le_bytes());
+
+    let mut prefixed = b"synthetic ZIP prefix".to_vec();
+    prefixed.extend_from_slice(&archive);
+    prefixed
+}
+
+fn add_zip64_extensible_decoy(zip64: &mut Vec<u8>, decoy_entries: u64) {
+    let locator = zip64
+        .windows(4)
+        .rposition(|window| window == b"PK\x06\x07")
+        .expect("ZIP64 locator");
+    let record = locator.checked_sub(56).expect("fixed ZIP64 record");
+    assert_eq!(&zip64[record..record + 4], b"PK\x06\x06");
+
+    let extension = [0_u8; 160];
+    zip64.splice(locator..locator, extension.iter().copied());
+    let new_locator = locator + extension.len();
+    zip64[record + 4..record + 12]
+        .copy_from_slice(&(44_u64 + extension.len() as u64).to_le_bytes());
+
+    let decoy = record + 56 + 8;
+    assert!(decoy + 56 <= new_locator);
+    let decoy_record_size = (new_locator - decoy - 12) as u64;
+    let record_disk_fields = zip64[record + 12..record + 24].to_vec();
+    let record_directory_fields = zip64[record + 40..record + 56].to_vec();
+    zip64[decoy..decoy + 4].copy_from_slice(b"PK\x06\x06");
+    zip64[decoy + 4..decoy + 12].copy_from_slice(&decoy_record_size.to_le_bytes());
+    zip64[decoy + 12..decoy + 24].copy_from_slice(&record_disk_fields);
+    zip64[decoy + 24..decoy + 32].copy_from_slice(&decoy_entries.to_le_bytes());
+    zip64[decoy + 32..decoy + 40].copy_from_slice(&decoy_entries.to_le_bytes());
+    zip64[decoy + 40..decoy + 56].copy_from_slice(&record_directory_fields);
+}
+
+struct ByteCountingReader<R> {
+    inner: R,
+    bytes_read: u64,
+}
+
+impl<R: Read> Read for ByteCountingReader<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let read = self.inner.read(buffer)?;
+        self.bytes_read += read as u64;
+        Ok(read)
+    }
+}
+
+impl<R: Seek> Seek for ByteCountingReader<R> {
+    fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(position)
+    }
+}
+
+fn write_repetitive_deflated_archive(path: &Path, entries: &[(String, u64)]) {
+    let date = DateTime::from_date_and_time(2000, 1, 1, 0, 0, 0).unwrap();
+    let options = SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Deflated)
+        .last_modified_time(date)
+        .unix_permissions(0o644);
+    let mut archive = ZipWriter::new(File::create(path).unwrap());
+    let block = [b'A'; 64 * 1024];
+    for (name, size) in entries {
+        archive.start_file(name, options).unwrap();
+        let mut remaining = *size;
+        while remaining != 0 {
+            let count = remaining.min(block.len() as u64) as usize;
+            archive.write_all(&block[..count]).unwrap();
+            remaining -= count as u64;
         }
     }
     archive.finish().unwrap();
@@ -1007,4 +1110,480 @@ fn rust_rejects_windows_archive_aliases_and_unsafe_types() {
         make_adversarial_archive(&repo_root(), &valid, &archive, case);
         assert_rust_rejects(&repo_root(), &archive, expected);
     }
+}
+
+#[test]
+fn rust_rejects_a_high_ratio_member_over_the_expansion_limit() {
+    const MEMBER_LIMIT: u64 = 16 * 1024 * 1024;
+
+    let temp = tempfile::tempdir().unwrap();
+    let archive = temp.path().join("high-ratio.zip");
+    write_repetitive_deflated_archive(
+        &archive,
+        &[(
+            "MRI-Drive-Maker-v0.3.0/App/compressible.bin".into(),
+            MEMBER_LIMIT + 1,
+        )],
+    );
+
+    let mut zip = ZipArchive::new(File::open(&archive).unwrap()).unwrap();
+    let member = zip.by_index(0).unwrap();
+    assert!(member.compressed_size() * 100 < member.size());
+
+    assert_rust_rejects(
+        &repo_root(),
+        &archive,
+        Some("ZIP member exceeds the per-member expanded-size limit"),
+    );
+}
+
+#[test]
+fn rust_rejects_a_manifest_over_its_retained_memory_limit() {
+    const MANIFEST_LIMIT: u64 = 1024 * 1024;
+
+    let temp = tempfile::tempdir().unwrap();
+    let archive = temp.path().join("oversized-manifest.zip");
+    write_repetitive_deflated_archive(
+        &archive,
+        &[(
+            "MRI-Drive-Maker-v0.3.0/RELEASE.json".into(),
+            MANIFEST_LIMIT + 1,
+        )],
+    );
+
+    assert_rust_rejects(
+        &repo_root(),
+        &archive,
+        Some("RELEASE.json exceeds the manifest-size limit"),
+    );
+}
+
+#[test]
+fn rust_rejects_aggregate_expansion_before_reading_payloads() {
+    const MEMBER_LIMIT: u64 = 16 * 1024 * 1024;
+
+    let temp = tempfile::tempdir().unwrap();
+    let archive = temp.path().join("aggregate-limit.zip");
+    let root = "MRI-Drive-Maker-v0.3.0";
+    let mut entries = (0..4)
+        .map(|index| (format!("{root}/App/member-{index}.bin"), MEMBER_LIMIT))
+        .collect::<Vec<_>>();
+    entries.push((format!("{root}/RELEASE.json"), 1));
+    write_repetitive_deflated_archive(&archive, &entries);
+
+    assert_rust_rejects(
+        &repo_root(),
+        &archive,
+        Some("ZIP exceeds the aggregate expanded-size limit"),
+    );
+}
+
+#[test]
+fn rust_rejects_archives_over_the_entry_count_limit() {
+    let temp = tempfile::tempdir().unwrap();
+    let archive = temp.path().join("too-many-entries.zip");
+    let entries = (0..=4096)
+        .map(|index| (format!("MRI-Drive-Maker-v0.3.0/App/empty-{index}.txt"), 0))
+        .collect::<Vec<_>>();
+    write_repetitive_deflated_archive(&archive, &entries);
+
+    assert_rust_rejects(&repo_root(), &archive, Some("ZIP entry count exceeds 4096"));
+}
+
+#[test]
+fn rust_rejects_declared_entry_count_before_parsing_the_central_directory() {
+    let temp = tempfile::tempdir().unwrap();
+    let archive = temp.path().join("oversized-declared-entry-count.zip");
+    let entries = (0..5)
+        .map(|index| TestEntry {
+            name: format!("MRI-Drive-Maker-v0.3.0/App/empty-{index}.txt"),
+            contents: Vec::new(),
+            kind: TestEntryKind::File,
+        })
+        .collect::<Vec<_>>();
+    write_test_archive(&archive, &entries);
+
+    let limits = ResourceLimits {
+        max_entries: 4,
+        ..DEFAULT_RESOURCE_LIMITS
+    };
+    let error = verify_with_limits(&repo_root(), &archive, &process_environment(), limits)
+        .expect_err("declared entry count must be rejected before central-directory parsing");
+    assert!(error.contains("ZIP entry count exceeds 4"), "{error}");
+}
+
+#[test]
+fn zip64_entry_count_preflight_supports_prepended_archives() {
+    let temp = tempfile::tempdir().unwrap();
+    let zip32 = temp.path().join("ordinary.zip");
+    let entries = (0..5)
+        .map(|index| TestEntry {
+            name: format!("MRI-Drive-Maker-v0.3.0/App/empty-{index}.txt"),
+            contents: Vec::new(),
+            kind: TestEntryKind::File,
+        })
+        .collect::<Vec<_>>();
+    write_test_archive(&zip32, &entries);
+    let bytes = prepend_zip_prefix_and_upgrade_to_zip64(&fs::read(zip32).unwrap());
+    let parsed = ZipArchive::new(Cursor::new(bytes.clone())).unwrap();
+    assert_eq!(
+        parsed.len(),
+        5,
+        "fixture must be a valid prefixed ZIP64 archive"
+    );
+
+    let archive_len = bytes.len() as u64;
+    let mut metadata_reader = Cursor::new(bytes.clone());
+    let directory = zip64_directory(&mut metadata_reader, archive_len - 22)
+        .expect("the ZIP64 locator must resolve to its end record");
+    assert_eq!(
+        directory.archive_prefix,
+        b"synthetic ZIP prefix".len() as u64
+    );
+    let directory_start = directory.directory_offset + directory.archive_prefix;
+    assert_eq!(
+        directory_start + directory.directory_size,
+        directory.eocd_offset,
+        "prefixed central directory must end at the ZIP64 record"
+    );
+    assert_eq!(
+        central_directory_entry_count(
+            &mut metadata_reader,
+            directory_start,
+            directory.eocd_offset,
+            usize::MAX,
+        ),
+        Some(5),
+        "preflight must walk all entries in the prefixed central directory"
+    );
+
+    let mut archive = Cursor::new(bytes);
+    let error = preflight_zip_entry_count(&mut archive, archive_len, 4)
+        .expect_err("ZIP64 entry count must be rejected before archive construction");
+    assert!(error.contains("ZIP entry count exceeds 4"), "{error}");
+}
+
+#[test]
+fn zip32_entry_count_preflight_rejects_an_underreported_directory() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("underreported-entry-count.zip");
+    let entries = (0..5)
+        .map(|index| TestEntry {
+            name: format!("MRI-Drive-Maker-v0.3.0/App/empty-{index}.txt"),
+            contents: Vec::new(),
+            kind: TestEntryKind::File,
+        })
+        .collect::<Vec<_>>();
+    write_test_archive(&path, &entries);
+    let mut bytes = fs::read(path).unwrap();
+    let eocd = bytes.len() - 22;
+    bytes[eocd + 8..eocd + 10].copy_from_slice(&1_u16.to_le_bytes());
+    bytes[eocd + 10..eocd + 12].copy_from_slice(&1_u16.to_le_bytes());
+
+    let archive_len = bytes.len() as u64;
+    let mut archive = Cursor::new(bytes);
+    let error = preflight_zip_entry_count(&mut archive, archive_len, 4)
+        .expect_err("all central-directory entries must be counted before ZIP parsing");
+    assert!(
+        error.contains("ZIP entry count exceeds 4"),
+        "underreported archive was not rejected as over limit: {error}"
+    );
+}
+
+#[test]
+fn zip64_prefix_preflight_uses_the_same_record_as_zip_rs() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("ordinary.zip");
+    let entries = (0..5)
+        .map(|index| TestEntry {
+            name: format!("MRI-Drive-Maker-v0.3.0/App/empty-{index}.txt"),
+            contents: Vec::new(),
+            kind: TestEntryKind::File,
+        })
+        .collect::<Vec<_>>();
+    write_test_archive(&path, &entries);
+    let mut bytes = prepend_zip_prefix_and_upgrade_to_zip64(&fs::read(path).unwrap());
+    add_zip64_extensible_decoy(&mut bytes, 1);
+
+    let parsed = ZipArchive::new(Cursor::new(bytes.clone())).unwrap();
+    assert_eq!(parsed.len(), 5, "fixture must use the real ZIP64 record");
+
+    let archive_len = bytes.len() as u64;
+    let mut archive = Cursor::new(bytes);
+    let error = preflight_zip_entry_count(&mut archive, archive_len, 4)
+        .expect_err("preflight must reject the real record's over-limit count");
+    assert!(error.contains("ZIP entry count exceeds 4"), "{error}");
+}
+
+#[test]
+fn zip64_preflight_rejects_an_invalid_disk_decoy_before_the_real_record() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("ordinary.zip");
+    let entries = (0..5)
+        .map(|index| TestEntry {
+            name: format!("MRI-Drive-Maker-v0.3.0/App/empty-{index}.txt"),
+            contents: Vec::new(),
+            kind: TestEntryKind::File,
+        })
+        .collect::<Vec<_>>();
+    write_test_archive(&path, &entries);
+
+    let archive = prepend_zip_prefix_and_upgrade_to_zip64(&fs::read(path).unwrap());
+    let original_prefix_len = b"synthetic ZIP prefix".len();
+    let original_locator = archive
+        .windows(4)
+        .rposition(|window| window == b"PK\x06\x07")
+        .expect("ZIP64 locator");
+    let relative_eocd_offset = u64::from_le_bytes(
+        archive[original_locator + 8..original_locator + 16]
+            .try_into()
+            .unwrap(),
+    );
+    let archive_body = &archive[original_prefix_len..];
+
+    // Put a low-count ZIP64 decoy in prepended bytes after the locator's relative offset.
+    // zip-rs rejects it because its disk number disagrees with the locator, then selects the
+    // real record later in the file.
+    let decoy_offset = relative_eocd_offset + 1024;
+    let prefix_len = usize::try_from(decoy_offset + 128).unwrap();
+    let mut bytes = vec![0; prefix_len];
+    let decoy_directory_start = usize::try_from(decoy_offset - 46).unwrap();
+    bytes[decoy_directory_start..decoy_directory_start + 4].copy_from_slice(b"PK\x01\x02");
+    bytes.extend_from_slice(archive_body);
+
+    let locator = bytes
+        .windows(4)
+        .rposition(|window| window == b"PK\x06\x07")
+        .expect("real ZIP64 locator");
+    assert!(decoy_offset + 56 <= locator as u64);
+    let decoy_record = usize::try_from(decoy_offset).unwrap();
+    bytes[decoy_record..decoy_record + 4].copy_from_slice(b"PK\x06\x06");
+    bytes[decoy_record + 4..decoy_record + 12]
+        .copy_from_slice(&((locator as u64 - decoy_offset - 12).to_le_bytes()));
+    bytes[decoy_record + 12..decoy_record + 14].copy_from_slice(&45_u16.to_le_bytes());
+    bytes[decoy_record + 14..decoy_record + 16].copy_from_slice(&45_u16.to_le_bytes());
+    bytes[decoy_record + 16..decoy_record + 20].copy_from_slice(&0_u32.to_le_bytes());
+    bytes[decoy_record + 20..decoy_record + 24].copy_from_slice(&1_u32.to_le_bytes());
+    bytes[decoy_record + 24..decoy_record + 32].copy_from_slice(&1_u64.to_le_bytes());
+    bytes[decoy_record + 32..decoy_record + 40].copy_from_slice(&1_u64.to_le_bytes());
+    bytes[decoy_record + 40..decoy_record + 48].copy_from_slice(&46_u64.to_le_bytes());
+    bytes[decoy_record + 48..decoy_record + 56]
+        .copy_from_slice(&(relative_eocd_offset - 46).to_le_bytes());
+
+    let parsed = ZipArchive::new(Cursor::new(bytes.clone())).unwrap();
+    assert_eq!(parsed.len(), 5, "zip-rs must select the real ZIP64 record");
+
+    let archive_len = bytes.len() as u64;
+    let mut archive = Cursor::new(bytes);
+    let error = preflight_zip_entry_count(&mut archive, archive_len, 4)
+        .expect_err("preflight must reject the real record's over-limit count");
+    assert!(error.contains("ZIP entry count exceeds 4"), "{error}");
+}
+
+#[test]
+fn zip64_candidate_scanning_has_a_bounded_total_read_budget() {
+    const DECOY_COUNT: usize = 100;
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("base.zip");
+    write_test_archive(
+        &path,
+        &[TestEntry {
+            name: "MRI-Drive-Maker-v0.3.0/App/one.txt".into(),
+            contents: b"one".to_vec(),
+            kind: TestEntryKind::File,
+        }],
+    );
+    let mut bytes = fs::read(path).unwrap();
+    let eocd = bytes.len() - 22;
+    let mut decoys = Vec::with_capacity(DECOY_COUNT * 42);
+    for _ in 0..DECOY_COUNT {
+        decoys.extend_from_slice(b"PK\x06\x07");
+        decoys.extend_from_slice(&0_u32.to_le_bytes());
+        decoys.extend_from_slice(&0_u64.to_le_bytes());
+        decoys.extend_from_slice(&1_u32.to_le_bytes());
+        decoys.extend_from_slice(b"PK\x05\x06");
+        decoys.extend_from_slice(&0_u16.to_le_bytes());
+        decoys.extend_from_slice(&0_u16.to_le_bytes());
+        decoys.extend_from_slice(&u16::MAX.to_le_bytes());
+        decoys.extend_from_slice(&u16::MAX.to_le_bytes());
+        decoys.extend_from_slice(&0_u32.to_le_bytes());
+        decoys.extend_from_slice(&0_u32.to_le_bytes());
+        decoys.extend_from_slice(&0_u16.to_le_bytes());
+    }
+    assert!(decoys.len() <= u16::MAX as usize);
+    bytes[eocd + 20..eocd + 22].copy_from_slice(&(decoys.len() as u16).to_le_bytes());
+    bytes.extend_from_slice(&decoys);
+
+    let archive_len = bytes.len() as u64;
+    let mut archive = ByteCountingReader {
+        inner: Cursor::new(bytes),
+        bytes_read: 0,
+    };
+    let error = preflight_zip_entry_count(&mut archive, archive_len, 4)
+        .expect_err("many ZIP64 decoys must exhaust the bounded preflight budget");
+    assert!(error.contains("bounded"), "unexpected error: {error}");
+    assert!(
+        archive.bytes_read <= archive_len.saturating_mul(3),
+        "preflight read {} bytes for a {archive_len}-byte archive",
+        archive.bytes_read
+    );
+}
+
+#[test]
+fn zip_comment_eocd_decoy_does_not_override_the_real_entry_count() {
+    let temp = tempfile::tempdir().unwrap();
+    let archive = temp.path().join("comment-decoy.zip");
+    write_test_archive(
+        &archive,
+        &[TestEntry {
+            name: "MRI-Drive-Maker-v0.3.0/App/one.txt".into(),
+            contents: b"one".to_vec(),
+            kind: TestEntryKind::File,
+        }],
+    );
+    let mut bytes = fs::read(&archive).unwrap();
+    let eocd = bytes.len() - 22;
+    let directory_size = bytes[eocd + 12..eocd + 16].to_vec();
+    let directory_offset = bytes[eocd + 16..eocd + 20].to_vec();
+    bytes[eocd + 20..eocd + 22].copy_from_slice(&22_u16.to_le_bytes());
+
+    let mut decoy = [0_u8; 22];
+    decoy[..4].copy_from_slice(b"PK\x05\x06");
+    decoy[8..10].copy_from_slice(&5_u16.to_le_bytes());
+    decoy[10..12].copy_from_slice(&5_u16.to_le_bytes());
+    decoy[12..16].copy_from_slice(&directory_size);
+    decoy[16..20].copy_from_slice(&directory_offset);
+    bytes.extend_from_slice(&decoy);
+
+    let archive_len = bytes.len() as u64;
+    let mut archive = Cursor::new(bytes.clone());
+    preflight_zip_entry_count(&mut archive, archive_len, 4)
+        .expect("an EOCD signature in a ZIP comment must not reject a valid archive");
+    let parsed = ZipArchive::new(Cursor::new(bytes)).unwrap();
+    assert_eq!(parsed.len(), 1);
+}
+
+#[test]
+fn rust_rejects_oversized_compressed_input_before_zip_parsing() {
+    let temp = tempfile::tempdir().unwrap();
+    let archive = temp.path().join("oversized-input.zip");
+    fs::write(&archive, b"oversized input fixture").unwrap();
+    let limits = ResourceLimits {
+        max_archive_bytes: 8,
+        ..DEFAULT_RESOURCE_LIMITS
+    };
+
+    let error = verify_with_limits(&repo_root(), &archive, &process_environment(), limits)
+        .expect_err("oversized compressed input should be rejected before ZIP parsing");
+    assert!(error.contains("ZIP archive exceeds the compressed-input-size limit"));
+}
+
+#[test]
+fn streaming_enforces_actual_member_and_aggregate_expansion_limits() {
+    let limits = ResourceLimits {
+        max_archive_bytes: 1024,
+        max_entries: 4,
+        max_member_bytes: 4,
+        max_total_bytes: 6,
+        max_manifest_bytes: 4,
+    };
+    let mut actual_total = 0;
+
+    let mut too_large_member = Cursor::new(b"12345".to_vec());
+    let error = stream_member(
+        &mut too_large_member,
+        "member.bin",
+        3,
+        false,
+        &mut actual_total,
+        limits,
+    )
+    .expect_err("actual member output should be bounded even when its declaration is smaller");
+    assert!(error.contains("ZIP member exceeds the per-member expanded-size limit"));
+
+    let mut first_member = Cursor::new(b"123".to_vec());
+    stream_member(
+        &mut first_member,
+        "first.bin",
+        3,
+        false,
+        &mut actual_total,
+        limits,
+    )
+    .unwrap();
+    let mut second_member = Cursor::new(b"4567".to_vec());
+    let error = stream_member(
+        &mut second_member,
+        "second.bin",
+        4,
+        false,
+        &mut actual_total,
+        limits,
+    )
+    .expect_err("actual aggregate output should stop at the configured total");
+    assert!(error.contains("ZIP exceeds the aggregate expanded-size limit"));
+}
+
+#[test]
+fn streaming_enforces_actual_retained_manifest_limit() {
+    let limits = ResourceLimits {
+        max_archive_bytes: 1024,
+        max_entries: 4,
+        max_member_bytes: 8,
+        max_total_bytes: 10,
+        max_manifest_bytes: 4,
+    };
+    let mut actual_total = 0;
+    let mut oversized_manifest = Cursor::new(b"12345".to_vec());
+    let error = stream_member(
+        &mut oversized_manifest,
+        "RELEASE.json",
+        4,
+        true,
+        &mut actual_total,
+        limits,
+    )
+    .expect_err("actual retained manifest bytes should be capped while streaming");
+
+    assert!(error.contains("RELEASE.json exceeds the manifest-size limit"));
+}
+
+#[test]
+fn oversized_release_member_cleans_the_staged_archive() {
+    const MEMBER_LIMIT: usize = 16 * 1024 * 1024;
+
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    let output_dir = temp.path().join("output");
+    fs::create_dir_all(&output_dir).unwrap();
+    let archive = output_dir.join("release.zip");
+    let environment = test_environment(&[]);
+    let oversized_source = "A".repeat(MEMBER_LIMIT + 1);
+    synthetic_repository(
+        &repo,
+        &oversized_source,
+        "@echo synthetic\r\n",
+        &environment,
+    );
+
+    let error =
+        build_with_environment(&repo, &archive, "0.3.0", &synthetic_sources(), &environment)
+            .expect_err("a release with an oversized committed source should fail verification");
+    assert!(error.contains("ZIP member exceeds the per-member expanded-size limit"));
+    assert!(
+        !archive.exists(),
+        "failed verification left the final archive"
+    );
+    assert_eq!(
+        fs::read_dir(&output_dir).unwrap().count(),
+        0,
+        "failed verification left a staged archive"
+    );
+}
+
+#[test]
+fn published_source_archive_is_accepted_by_the_rust_verifier() {
+    let repo = repo_root();
+    let archive = repo.join("downloads/MRI-Drive-Maker-v0.3.0.zip");
+    verify(&repo, &archive).expect("published source ZIP should remain within verifier limits");
 }

@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap};
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use zip::{write::SimpleFileOptions, CompressionMethod, DateTime, ZipArchive, ZipWriter};
@@ -210,6 +210,24 @@ fn committed_with_environment(
 ) -> Result<Vec<u8>, String> {
     git_with_environment(repo, &["show", &format!("{revision}:{path}")], environment)
 }
+fn committed_size_with_environment(
+    repo: &Path,
+    revision: &str,
+    path: &str,
+    environment: &[(OsString, OsString)],
+) -> Result<u64, String> {
+    let output = git_with_environment(
+        repo,
+        &["cat-file", "-s", &format!("{revision}:{path}")],
+        environment,
+    )?;
+    let size = std::str::from_utf8(&output)
+        .map_err(|_| "Git returned a non-UTF-8 source size")?
+        .trim()
+        .parse::<u64>()
+        .map_err(|_| "Git returned an invalid source size")?;
+    Ok(size)
+}
 fn manifest_name(source: &str, prefix: &str) -> String {
     format!("{prefix}{source}")
 }
@@ -280,14 +298,527 @@ fn canonical_member_name(name: &str) -> Result<(String, String), String> {
 fn verify(repo: &Path, archive_path: &Path) -> Result<Manifest, String> {
     verify_with_environment(repo, archive_path, &process_environment())
 }
+
+#[derive(Clone, Copy)]
+struct ResourceLimits {
+    max_archive_bytes: u64,
+    max_entries: usize,
+    max_member_bytes: u64,
+    max_total_bytes: u64,
+    max_manifest_bytes: u64,
+}
+
+const DEFAULT_RESOURCE_LIMITS: ResourceLimits = ResourceLimits {
+    max_archive_bytes: 128 * 1024 * 1024,
+    max_entries: 4096,
+    max_member_bytes: 16 * 1024 * 1024,
+    max_total_bytes: 64 * 1024 * 1024,
+    max_manifest_bytes: 1024 * 1024,
+};
+
+const ZIP_STREAM_BUFFER_BYTES: usize = 64 * 1024;
+
+fn read_exact_at<R: Read + Seek>(
+    reader: &mut R,
+    offset: u64,
+    buffer: &mut [u8],
+) -> std::io::Result<()> {
+    reader.seek(SeekFrom::Start(offset))?;
+    reader.read_exact(buffer)
+}
+
+#[derive(Clone, Copy)]
+struct Zip64Directory {
+    entry_count: u64,
+    directory_size: u64,
+    directory_offset: u64,
+    archive_prefix: u64,
+    eocd_offset: u64,
+}
+
+struct PreflightReader<'a, R> {
+    inner: &'a mut R,
+    bytes_remaining: u64,
+    exceeded: bool,
+}
+
+impl<'a, R> PreflightReader<'a, R> {
+    fn new(inner: &'a mut R, max_bytes: u64) -> Self {
+        Self {
+            inner,
+            bytes_remaining: max_bytes,
+            exceeded: false,
+        }
+    }
+}
+
+impl<R: Read> Read for PreflightReader<'_, R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        if self.bytes_remaining == 0 {
+            self.exceeded = true;
+            return Err(std::io::Error::other(
+                "ZIP metadata preflight read budget exceeded",
+            ));
+        }
+        let allowed = buffer
+            .len()
+            .min(usize::try_from(self.bytes_remaining).unwrap_or(usize::MAX));
+        let read = self.inner.read(&mut buffer[..allowed])?;
+        self.bytes_remaining -= read as u64;
+        Ok(read)
+    }
+}
+
+impl<R: Seek> Seek for PreflightReader<'_, R> {
+    fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(position)
+    }
+}
+
+fn zip64_directory_at<R: Read + Seek>(
+    reader: &mut R,
+    zip64_offset: u64,
+    locator_offset: u64,
+    relative_offset: u64,
+    locator_disk: u32,
+) -> Option<Zip64Directory> {
+    let mut zip64_eocd = [0_u8; 56];
+    read_exact_at(reader, zip64_offset, &mut zip64_eocd).ok()?;
+    if zip64_eocd[..4] != *b"PK\x06\x06" {
+        return None;
+    }
+    let record_size = u64::from_le_bytes(zip64_eocd[4..12].try_into().ok()?);
+    let record_end = zip64_offset.checked_add(12)?.checked_add(record_size)?;
+    if record_size < 44 || record_end != locator_offset {
+        return None;
+    }
+    let archive_prefix = zip64_offset.checked_sub(relative_offset)?;
+    let disk_number = u32::from_le_bytes(zip64_eocd[16..20].try_into().ok()?);
+    let disk_with_central_directory = u32::from_le_bytes(zip64_eocd[20..24].try_into().ok()?);
+    let entries_on_disk = u64::from_le_bytes(zip64_eocd[24..32].try_into().ok()?);
+    let entries_total = u64::from_le_bytes(zip64_eocd[32..40].try_into().ok()?);
+    let directory_size = u64::from_le_bytes(zip64_eocd[40..48].try_into().ok()?);
+    let directory_offset = u64::from_le_bytes(zip64_eocd[48..56].try_into().ok()?);
+    // Match zip-rs's locator consistency check, then fail closed on multi-disk records before
+    // trusting their entry counts. The verifier supports single-disk release archives only.
+    if disk_number != locator_disk
+        || disk_with_central_directory != locator_disk
+        || entries_on_disk > entries_total
+        || zip64_offset
+            < entries_total
+                .saturating_mul(46)
+                .saturating_add(directory_offset)
+    {
+        return None;
+    }
+    Some(Zip64Directory {
+        entry_count: entries_total,
+        directory_size,
+        directory_offset,
+        archive_prefix,
+        eocd_offset: zip64_offset,
+    })
+}
+
+fn zip64_directory<R: Read + Seek>(reader: &mut R, eocd_offset: u64) -> Option<Zip64Directory> {
+    const LOCATOR_BYTES: u64 = 20;
+    const BUFFER_BYTES: usize = 64 * 1024;
+    let locator_offset = eocd_offset.checked_sub(LOCATOR_BYTES)?;
+    let mut locator = [0_u8; LOCATOR_BYTES as usize];
+    read_exact_at(reader, locator_offset, &mut locator).ok()?;
+    if locator[..4] != *b"PK\x06\x07" {
+        return None;
+    }
+    let locator_disk = u32::from_le_bytes(locator[4..8].try_into().ok()?);
+    let relative_offset = u64::from_le_bytes(locator[8..16].try_into().ok()?);
+    let number_of_disks = u32::from_le_bytes(locator[16..20].try_into().ok()?);
+    if locator_disk != 0 || number_of_disks != 1 {
+        return None;
+    }
+    if let Some(directory) = zip64_directory_at(
+        reader,
+        relative_offset,
+        locator_offset,
+        relative_offset,
+        locator_disk,
+    ) {
+        return Some(directory);
+    }
+
+    // zip-rs searches forward from the locator's archive-relative offset. Keep the same direction
+    // so a signature inside the ZIP64 extensible sector cannot replace the record zip-rs selects.
+    let last_candidate = locator_offset.checked_sub(56)?;
+    // Read all four signature bytes at the last candidate offset.
+    let search_end = last_candidate.checked_add(4)?;
+    if relative_offset >= search_end {
+        return None;
+    }
+    let mut buffer = [0_u8; BUFFER_BYTES];
+    let mut range_start = relative_offset;
+    while range_start < search_end {
+        let range_len =
+            usize::try_from((search_end - range_start).min(BUFFER_BYTES as u64)).ok()?;
+        read_exact_at(reader, range_start, &mut buffer[..range_len]).ok()?;
+        if range_len >= 4 {
+            for index in 0..=range_len - 4 {
+                if buffer[index..index + 4] != *b"PK\x06\x06" {
+                    continue;
+                }
+                let candidate = range_start.checked_add(index as u64)?;
+                if let Some(directory) = zip64_directory_at(
+                    reader,
+                    candidate,
+                    locator_offset,
+                    relative_offset,
+                    locator_disk,
+                ) {
+                    return Some(directory);
+                }
+            }
+        }
+        if range_len <= 3 {
+            break;
+        }
+        range_start = range_start.checked_add((range_len - 3) as u64)?;
+    }
+    None
+}
+
+fn find_central_directory_start<R: Read + Seek>(
+    reader: &mut R,
+    start: u64,
+    end: u64,
+) -> Option<u64> {
+    const BUFFER_BYTES: usize = 64 * 1024;
+    let mut buffer = [0_u8; BUFFER_BYTES];
+    let mut position = start;
+    while position.checked_add(4)? <= end {
+        let read_len = usize::try_from((end - position).min(BUFFER_BYTES as u64)).ok()?;
+        read_exact_at(reader, position, &mut buffer[..read_len]).ok()?;
+        if read_len >= 4 {
+            for index in 0..=read_len - 4 {
+                if buffer[index..index + 4] == *b"PK\x01\x02" {
+                    return Some(position + index as u64);
+                }
+            }
+        }
+        if read_len <= 3 {
+            break;
+        }
+        position = position.checked_add((read_len - 3) as u64)?;
+    }
+    None
+}
+
+fn central_directory_entry_count<R: Read + Seek>(
+    reader: &mut R,
+    mut position: u64,
+    directory_end: u64,
+    max_entries: usize,
+) -> Option<usize> {
+    let mut count = 0_usize;
+    while position < directory_end {
+        if position.checked_add(4)? > directory_end {
+            return None;
+        }
+        let mut signature = [0_u8; 4];
+        read_exact_at(reader, position, &mut signature).ok()?;
+        if signature == *b"PK\x01\x02" {
+            if position.checked_add(46)? > directory_end {
+                return None;
+            }
+            let mut rest = [0_u8; 42];
+            read_exact_at(reader, position.checked_add(4)?, &mut rest).ok()?;
+            let name_len = u16::from_le_bytes([rest[24], rest[25]]) as u64;
+            let extra_len = u16::from_le_bytes([rest[26], rest[27]]) as u64;
+            let comment_len = u16::from_le_bytes([rest[28], rest[29]]) as u64;
+            position = position
+                .checked_add(46)?
+                .checked_add(name_len)?
+                .checked_add(extra_len)?
+                .checked_add(comment_len)?;
+            if position > directory_end {
+                return None;
+            }
+            count = count.checked_add(1)?;
+            if count > max_entries {
+                return Some(count);
+            }
+        } else if signature == *b"PK\x05\x05" {
+            if position.checked_add(6)? > directory_end {
+                return None;
+            }
+            let mut signature_len = [0_u8; 2];
+            read_exact_at(reader, position.checked_add(4)?, &mut signature_len).ok()?;
+            let next = position
+                .checked_add(6)?
+                .checked_add(u16::from_le_bytes(signature_len) as u64)?;
+            return (next == directory_end).then_some(count);
+        } else {
+            return None;
+        }
+    }
+    Some(count)
+}
+
+fn preflight_zip_entry_count<R: Read + Seek>(
+    reader: &mut R,
+    archive_bytes: u64,
+    max_entries: usize,
+) -> Result<(), String> {
+    const EOCD_FIXED_BYTES: usize = 22;
+    const MAX_COMMENT_BYTES: u64 = u16::MAX as u64;
+    const EOCD_SIG: &[u8; 4] = b"PK\x05\x06";
+    const EOCD_TAIL_BYTES: u64 = EOCD_FIXED_BYTES as u64 + MAX_COMMENT_BYTES;
+
+    if archive_bytes < EOCD_FIXED_BYTES as u64 {
+        return Err("ZIP lacks an end-of-central-directory record".into());
+    }
+    let tail_len = usize::try_from(archive_bytes.min(EOCD_TAIL_BYTES))
+        .map_err(|_| "ZIP end-record window does not fit in memory")?;
+    let tail_offset = archive_bytes - tail_len as u64;
+    let record_read_budget = u64::try_from(max_entries.saturating_add(1))
+        .unwrap_or(u64::MAX)
+        .saturating_mul(46)
+        .saturating_mul(2);
+    let max_read_bytes = archive_bytes
+        .saturating_add(tail_len as u64)
+        .saturating_add(record_read_budget);
+    let mut bounded_reader = PreflightReader::new(reader, max_read_bytes);
+    let mut tail = Vec::new();
+    tail.try_reserve_exact(tail_len)
+        .map_err(|error| format!("Cannot reserve ZIP end-record window: {error}"))?;
+    tail.resize(tail_len, 0);
+    read_exact_at(&mut bounded_reader, tail_offset, &mut tail).map_err(|error| {
+        if bounded_reader.exceeded {
+            "ZIP metadata preflight exceeded its bounded read budget".to_owned()
+        } else {
+            error.to_string()
+        }
+    })?;
+
+    let mut found_eocd = false;
+    for position in (0..=tail_len - EOCD_FIXED_BYTES).rev() {
+        if tail.get(position..position + 4) != Some(EOCD_SIG) {
+            continue;
+        }
+        let comment_len = u16::from_le_bytes([tail[position + 20], tail[position + 21]]) as usize;
+        if position + EOCD_FIXED_BYTES + comment_len > tail_len {
+            continue;
+        }
+
+        let entries_on_disk = u16::from_le_bytes([tail[position + 8], tail[position + 9]]) as u64;
+        let entries_total = u16::from_le_bytes([tail[position + 10], tail[position + 11]]) as u64;
+        let directory_size = u32::from_le_bytes([
+            tail[position + 12],
+            tail[position + 13],
+            tail[position + 14],
+            tail[position + 15],
+        ]) as u64;
+        let directory_offset = u32::from_le_bytes([
+            tail[position + 16],
+            tail[position + 17],
+            tail[position + 18],
+            tail[position + 19],
+        ]) as u64;
+        found_eocd = true;
+        let zip64 = entries_on_disk == u16::MAX as u64
+            || entries_total == u16::MAX as u64
+            || directory_size == u32::MAX as u64
+            || directory_offset == u32::MAX as u64;
+        let (declared_entries, directory_size, directory_offset, archive_prefix, directory_limit) =
+            if zip64 {
+                let eocd_offset = tail_offset + position as u64;
+                let Some(directory) = zip64_directory(&mut bounded_reader, eocd_offset) else {
+                    if bounded_reader.exceeded {
+                        return Err(
+                            "ZIP metadata preflight exceeded its bounded read budget".into()
+                        );
+                    }
+                    continue;
+                };
+                if bounded_reader.exceeded {
+                    return Err("ZIP metadata preflight exceeded its bounded read budget".into());
+                }
+                (
+                    directory.entry_count,
+                    directory.directory_size,
+                    directory.directory_offset,
+                    Some(directory.archive_prefix),
+                    directory.eocd_offset,
+                )
+            } else {
+                (
+                    entries_on_disk.max(entries_total),
+                    directory_size,
+                    directory_offset,
+                    None,
+                    tail_offset + position as u64,
+                )
+            };
+
+        let start = if let Some(prefix) = archive_prefix {
+            directory_offset.checked_add(prefix)
+        } else if declared_entries == 0 && directory_size == 0 {
+            Some(directory_limit)
+        } else {
+            let start = find_central_directory_start(
+                &mut bounded_reader,
+                directory_offset,
+                directory_limit,
+            );
+            if bounded_reader.exceeded {
+                return Err("ZIP metadata preflight exceeded its bounded read budget".into());
+            }
+            start
+        };
+        let Some(start) = start else {
+            continue;
+        };
+        let Some(end) = start.checked_add(directory_size) else {
+            continue;
+        };
+        if end != directory_limit {
+            continue;
+        }
+        let actual_entries =
+            central_directory_entry_count(&mut bounded_reader, start, end, max_entries);
+        if bounded_reader.exceeded {
+            return Err("ZIP metadata preflight exceeded its bounded read budget".into());
+        }
+        let Some(actual_entries) = actual_entries else {
+            continue;
+        };
+        if actual_entries > max_entries {
+            return Err(format!("ZIP entry count exceeds {max_entries}"));
+        }
+        if actual_entries as u64 == declared_entries {
+            return Ok(());
+        }
+    }
+
+    if bounded_reader.exceeded {
+        Err("ZIP metadata preflight exceeded its bounded read budget".into())
+    } else if found_eocd {
+        Err("ZIP central-directory entry count does not match its end record".into())
+    } else {
+        Err("ZIP lacks a valid end-of-central-directory record".into())
+    }
+}
+
+#[derive(Debug)]
+struct VerifiedMember {
+    expanded_bytes: u64,
+    sha256: String,
+}
+
+fn stream_member<R: Read>(
+    reader: &mut R,
+    name: &str,
+    declared_size: u64,
+    retain_contents: bool,
+    total_expanded: &mut u64,
+    limits: ResourceLimits,
+) -> Result<(VerifiedMember, Option<Vec<u8>>), String> {
+    if declared_size > limits.max_member_bytes {
+        return Err(format!(
+            "ZIP member exceeds the per-member expanded-size limit: {name}"
+        ));
+    }
+    if retain_contents && declared_size > limits.max_manifest_bytes {
+        return Err("RELEASE.json exceeds the manifest-size limit".into());
+    }
+
+    let mut contents = if retain_contents {
+        let capacity = usize::try_from(declared_size)
+            .map_err(|_| "RELEASE.json size does not fit in memory")?;
+        let mut contents = Vec::new();
+        contents
+            .try_reserve_exact(capacity)
+            .map_err(|error| format!("Cannot reserve bounded manifest memory: {error}"))?;
+        Some(contents)
+    } else {
+        None
+    };
+    let mut hasher = Sha256::new();
+    let mut expanded_bytes = 0_u64;
+    let mut buffer = [0_u8; ZIP_STREAM_BUFFER_BYTES];
+
+    loop {
+        let count = reader
+            .read(&mut buffer)
+            .map_err(|error| format!("ZIP CRC failure: {error}"))?;
+        if count == 0 {
+            break;
+        }
+        let count = u64::try_from(count).map_err(|_| "ZIP read size overflow")?;
+        expanded_bytes = expanded_bytes
+            .checked_add(count)
+            .ok_or("ZIP member expanded-size overflow")?;
+        if expanded_bytes > limits.max_member_bytes {
+            return Err(format!(
+                "ZIP member exceeds the per-member expanded-size limit: {name}"
+            ));
+        }
+        if retain_contents && expanded_bytes > limits.max_manifest_bytes {
+            return Err("RELEASE.json exceeds the manifest-size limit".into());
+        }
+        *total_expanded = total_expanded
+            .checked_add(count)
+            .ok_or("ZIP aggregate expanded-size overflow")?;
+        if *total_expanded > limits.max_total_bytes {
+            return Err("ZIP exceeds the aggregate expanded-size limit".into());
+        }
+        let count = usize::try_from(count).map_err(|_| "ZIP read size does not fit in memory")?;
+        hasher.update(&buffer[..count]);
+        if let Some(contents) = &mut contents {
+            contents.extend_from_slice(&buffer[..count]);
+        }
+    }
+
+    if expanded_bytes != declared_size {
+        return Err(format!(
+            "ZIP member expanded size differs from its declaration: {name}"
+        ));
+    }
+
+    Ok((
+        VerifiedMember {
+            expanded_bytes,
+            sha256: format!("{:x}", hasher.finalize()),
+        },
+        contents,
+    ))
+}
+
 fn verify_with_environment(
     repo: &Path,
     archive_path: &Path,
     environment: &[(OsString, OsString)],
 ) -> Result<Manifest, String> {
+    verify_with_limits(repo, archive_path, environment, DEFAULT_RESOURCE_LIMITS)
+}
+
+fn verify_with_limits(
+    repo: &Path,
+    archive_path: &Path,
+    environment: &[(OsString, OsString)],
+    limits: ResourceLimits,
+) -> Result<Manifest, String> {
     assert_git_identity(repo, environment)?;
-    let file = File::open(archive_path).map_err(|e| e.to_string())?;
+    let mut file = File::open(archive_path).map_err(|e| e.to_string())?;
+    let archive_bytes = file.metadata().map_err(|e| e.to_string())?.len();
+    if archive_bytes > limits.max_archive_bytes {
+        return Err("ZIP archive exceeds the compressed-input-size limit".into());
+    }
+    preflight_zip_entry_count(&mut file, archive_bytes, limits.max_entries)?;
     let mut zip = ZipArchive::new(file).map_err(|e| e.to_string())?;
+    if zip.len() > limits.max_entries {
+        return Err(format!("ZIP entry count exceeds {}", limits.max_entries));
+    }
     if let Err(error) = zip.validate_header_consistency() {
         let message = error.to_string();
         if message.contains("duplicate file names") {
@@ -299,9 +830,10 @@ fn verify_with_environment(
     let mut canonical_names = BTreeSet::new();
     let mut canonical_paths = Vec::new();
     let mut prefixes = BTreeSet::new();
-    let mut files = HashMap::new();
+    let mut entries = Vec::with_capacity(zip.len());
+    let mut declared_total = 0_u64;
     for index in 0..zip.len() {
-        let mut member = zip.by_index(index).map_err(|e| e.to_string())?;
+        let member = zip.by_index(index).map_err(|e| e.to_string())?;
         let name = member.name().map_err(|e| e.to_string())?.into_owned();
         if member.name_raw() != name.as_bytes() {
             return Err("Noncanonical ZIP member name encoding".into());
@@ -322,11 +854,22 @@ fn verify_with_environment(
         }
         canonical_paths.push(canonical);
         prefixes.insert(format!("MRI-Drive-Maker-v{version}"));
-        let mut contents = Vec::new();
-        member
-            .read_to_end(&mut contents)
-            .map_err(|e| format!("ZIP CRC failure: {e}"))?;
-        files.insert(name, contents);
+        let declared_size = member.size();
+        if declared_size > limits.max_member_bytes {
+            return Err(format!(
+                "ZIP member exceeds the per-member expanded-size limit: {name}"
+            ));
+        }
+        if name.ends_with("/RELEASE.json") && declared_size > limits.max_manifest_bytes {
+            return Err("RELEASE.json exceeds the manifest-size limit".into());
+        }
+        declared_total = declared_total
+            .checked_add(declared_size)
+            .ok_or("ZIP aggregate expanded-size overflow")?;
+        if declared_total > limits.max_total_bytes {
+            return Err("ZIP exceeds the aggregate expanded-size limit".into());
+        }
+        entries.push((name, declared_size));
     }
     for path in &canonical_paths {
         let parts: Vec<&str> = path.split('/').collect();
@@ -345,11 +888,38 @@ fn verify_with_environment(
         .strip_prefix("MRI-Drive-Maker-v")
         .ok_or("Invalid package root")?;
     let prefix = root.to_owned() + "/";
-    let manifest_bytes = files
-        .get(&(prefix.clone() + "RELEASE.json"))
-        .ok_or("Missing RELEASE.json")?;
+    let release_manifest_member_name = prefix.clone() + "RELEASE.json";
+    if !names.contains(&release_manifest_member_name) {
+        return Err("Missing RELEASE.json".into());
+    }
+
+    let mut members = HashMap::with_capacity(entries.len());
+    let mut manifest_bytes = None;
+    let mut actual_total = 0_u64;
+    for (index, (expected_name, expected_size)) in entries.iter().enumerate() {
+        let mut member = zip.by_index(index).map_err(|e| e.to_string())?;
+        let name = member.name().map_err(|e| e.to_string())?.into_owned();
+        let declared_size = member.size();
+        if name.as_str() != expected_name.as_str() || declared_size != *expected_size {
+            return Err("ZIP metadata changed after resource preflight".into());
+        }
+        let (verified, contents) = stream_member(
+            &mut member,
+            &name,
+            declared_size,
+            name == release_manifest_member_name,
+            &mut actual_total,
+            limits,
+        )?;
+        if name == release_manifest_member_name {
+            manifest_bytes = contents;
+        }
+        members.insert(name, verified);
+    }
+
+    let manifest_bytes = manifest_bytes.ok_or("Missing RELEASE.json")?;
     let manifest: Manifest =
-        serde_json::from_slice(manifest_bytes).map_err(|e| format!("Bad RELEASE.json: {e}"))?;
+        serde_json::from_slice(&manifest_bytes).map_err(|e| format!("Bad RELEASE.json: {e}"))?;
     if manifest.version != version {
         return Err("Package version does not match its root".into());
     }
@@ -374,15 +944,27 @@ fn verify_with_environment(
         return Err("Every packaged file must have a source origin".into());
     }
     for (name, source) in &manifest.source_files {
-        let contents = files
+        let verified = members
             .get(&manifest_name(name, &prefix))
             .ok_or("Missing declared package file")?;
-        if digest(contents) != manifest.sha256[name] {
+        if verified.sha256 != manifest.sha256[name] {
             return Err(format!("Package file SHA-256 mismatch: {name}"));
         }
-        if committed_with_environment(repo, &manifest.source_commit, source, environment)?
-            != *contents
-        {
+        let source_size =
+            committed_size_with_environment(repo, &manifest.source_commit, source, environment)?;
+        if source_size > limits.max_member_bytes {
+            return Err(format!(
+                "Committed source exceeds the per-member size limit: {name}"
+            ));
+        }
+        if source_size != verified.expanded_bytes {
+            return Err(format!("Source differs from declared Git commit: {name}"));
+        }
+        let source_contents =
+            committed_with_environment(repo, &manifest.source_commit, source, environment)?;
+        let source_bytes =
+            u64::try_from(source_contents.len()).map_err(|_| "Committed source size overflow")?;
+        if source_bytes != verified.expanded_bytes || digest(&source_contents) != verified.sha256 {
             return Err(format!("Source differs from declared Git commit: {name}"));
         }
     }
