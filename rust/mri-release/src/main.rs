@@ -743,6 +743,9 @@ fn stream_member<R: Read>(
                 "ZIP member exceeds the per-member expanded-size limit: {name}"
             ));
         }
+        if retain_contents && expanded_bytes > limits.max_manifest_bytes {
+            return Err("RELEASE.json exceeds the manifest-size limit".into());
+        }
         *total_expanded = total_expanded
             .checked_add(count)
             .ok_or("ZIP aggregate expanded-size overflow")?;

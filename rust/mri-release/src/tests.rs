@@ -1460,6 +1460,30 @@ fn streaming_enforces_actual_member_and_aggregate_expansion_limits() {
 }
 
 #[test]
+fn streaming_enforces_actual_retained_manifest_limit() {
+    let limits = ResourceLimits {
+        max_archive_bytes: 1024,
+        max_entries: 4,
+        max_member_bytes: 8,
+        max_total_bytes: 10,
+        max_manifest_bytes: 4,
+    };
+    let mut actual_total = 0;
+    let mut oversized_manifest = Cursor::new(b"12345".to_vec());
+    let error = stream_member(
+        &mut oversized_manifest,
+        "RELEASE.json",
+        4,
+        true,
+        &mut actual_total,
+        limits,
+    )
+    .expect_err("actual retained manifest bytes should be capped while streaming");
+
+    assert!(error.contains("RELEASE.json exceeds the manifest-size limit"));
+}
+
+#[test]
 fn oversized_release_member_cleans_the_staged_archive() {
     const MEMBER_LIMIT: usize = 16 * 1024 * 1024;
 
