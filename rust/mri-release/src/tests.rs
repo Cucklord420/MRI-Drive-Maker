@@ -1233,6 +1233,27 @@ fn zip64_entry_count_preflight_supports_prepended_archives() {
     );
 
     let archive_len = bytes.len() as u64;
+    let mut metadata_reader = Cursor::new(bytes.clone());
+    let directory = zip64_directory(&mut metadata_reader, archive_len - 22)
+        .expect("the ZIP64 locator must resolve to its end record");
+    assert_eq!(directory.archive_prefix, b"synthetic ZIP prefix".len() as u64);
+    let directory_start = directory.directory_offset + directory.archive_prefix;
+    assert_eq!(
+        directory_start + directory.directory_size,
+        directory.eocd_offset,
+        "prefixed central directory must end at the ZIP64 record"
+    );
+    assert_eq!(
+        central_directory_entry_count(
+            &mut metadata_reader,
+            directory_start,
+            directory.eocd_offset,
+            usize::MAX,
+        ),
+        Some(5),
+        "preflight must walk all entries in the prefixed central directory"
+    );
+
     let mut archive = Cursor::new(bytes);
     let error = preflight_zip_entry_count(&mut archive, archive_len, 4)
         .expect_err("ZIP64 entry count must be rejected before archive construction");
