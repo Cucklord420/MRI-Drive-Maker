@@ -435,7 +435,8 @@ fn zip64_directory<R: Read + Seek>(reader: &mut R, eocd_offset: u64) -> Option<Z
     // zip-rs searches forward from the locator's archive-relative offset. Keep the same direction
     // so a signature inside the ZIP64 extensible sector cannot replace the record zip-rs selects.
     let last_candidate = locator_offset.checked_sub(56)?;
-    let search_end = last_candidate.checked_add(1)?;
+    // Read all four signature bytes at the last candidate offset.
+    let search_end = last_candidate.checked_add(4)?;
     if relative_offset >= search_end {
         return None;
     }
