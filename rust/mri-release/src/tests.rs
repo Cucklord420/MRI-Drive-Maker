@@ -1316,6 +1316,71 @@ fn zip64_prefix_preflight_uses_the_same_record_as_zip_rs() {
 }
 
 #[test]
+fn zip64_preflight_rejects_an_invalid_disk_decoy_before_the_real_record() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("ordinary.zip");
+    let entries = (0..5)
+        .map(|index| TestEntry {
+            name: format!("MRI-Drive-Maker-v0.3.0/App/empty-{index}.txt"),
+            contents: Vec::new(),
+            kind: TestEntryKind::File,
+        })
+        .collect::<Vec<_>>();
+    write_test_archive(&path, &entries);
+
+    let archive = prepend_zip_prefix_and_upgrade_to_zip64(&fs::read(path).unwrap());
+    let original_prefix_len = b"synthetic ZIP prefix".len();
+    let original_locator = archive
+        .windows(4)
+        .rposition(|window| window == b"PK\x06\x07")
+        .expect("ZIP64 locator");
+    let relative_eocd_offset = u64::from_le_bytes(
+        archive[original_locator + 8..original_locator + 16]
+            .try_into()
+            .unwrap(),
+    );
+    let archive_body = &archive[original_prefix_len..];
+
+    // Put a low-count ZIP64 decoy in prepended bytes after the locator's relative offset.
+    // zip-rs rejects it because its disk number disagrees with the locator, then selects the
+    // real record later in the file.
+    let decoy_offset = relative_eocd_offset + 1024;
+    let prefix_len = usize::try_from(decoy_offset + 128).unwrap();
+    let mut bytes = vec![0; prefix_len];
+    let decoy_directory_start = usize::try_from(decoy_offset - 46).unwrap();
+    bytes[decoy_directory_start..decoy_directory_start + 4].copy_from_slice(b"PK\x01\x02");
+    bytes.extend_from_slice(archive_body);
+
+    let locator = bytes
+        .windows(4)
+        .rposition(|window| window == b"PK\x06\x07")
+        .expect("real ZIP64 locator");
+    assert!(decoy_offset + 56 <= locator as u64);
+    let decoy_record = usize::try_from(decoy_offset).unwrap();
+    bytes[decoy_record..decoy_record + 4].copy_from_slice(b"PK\x06\x06");
+    bytes[decoy_record + 4..decoy_record + 12]
+        .copy_from_slice(&((locator as u64 - decoy_offset - 12).to_le_bytes()));
+    bytes[decoy_record + 12..decoy_record + 14].copy_from_slice(&45_u16.to_le_bytes());
+    bytes[decoy_record + 14..decoy_record + 16].copy_from_slice(&45_u16.to_le_bytes());
+    bytes[decoy_record + 16..decoy_record + 20].copy_from_slice(&0_u32.to_le_bytes());
+    bytes[decoy_record + 20..decoy_record + 24].copy_from_slice(&1_u32.to_le_bytes());
+    bytes[decoy_record + 24..decoy_record + 32].copy_from_slice(&1_u64.to_le_bytes());
+    bytes[decoy_record + 32..decoy_record + 40].copy_from_slice(&1_u64.to_le_bytes());
+    bytes[decoy_record + 40..decoy_record + 48].copy_from_slice(&46_u64.to_le_bytes());
+    bytes[decoy_record + 48..decoy_record + 56]
+        .copy_from_slice(&(relative_eocd_offset - 46).to_le_bytes());
+
+    let parsed = ZipArchive::new(Cursor::new(bytes.clone())).unwrap();
+    assert_eq!(parsed.len(), 5, "zip-rs must select the real ZIP64 record");
+
+    let archive_len = bytes.len() as u64;
+    let mut archive = Cursor::new(bytes);
+    let error = preflight_zip_entry_count(&mut archive, archive_len, 4)
+        .expect_err("preflight must reject the real record's over-limit count");
+    assert!(error.contains("ZIP entry count exceeds 4"), "{error}");
+}
+
+#[test]
 fn zip64_candidate_scanning_has_a_bounded_total_read_budget() {
     const DECOY_COUNT: usize = 100;
     let temp = tempfile::tempdir().unwrap();
