@@ -383,6 +383,7 @@ fn zip64_directory_at<R: Read + Seek>(
     zip64_offset: u64,
     locator_offset: u64,
     relative_offset: u64,
+    locator_disk: u32,
 ) -> Option<Zip64Directory> {
     let mut zip64_eocd = [0_u8; 56];
     read_exact_at(reader, zip64_offset, &mut zip64_eocd).ok()?;
@@ -395,11 +396,17 @@ fn zip64_directory_at<R: Read + Seek>(
         return None;
     }
     let archive_prefix = zip64_offset.checked_sub(relative_offset)?;
+    let disk_number = u32::from_le_bytes(zip64_eocd[16..20].try_into().ok()?);
+    let disk_with_central_directory = u32::from_le_bytes(zip64_eocd[20..24].try_into().ok()?);
     let entries_on_disk = u64::from_le_bytes(zip64_eocd[24..32].try_into().ok()?);
     let entries_total = u64::from_le_bytes(zip64_eocd[32..40].try_into().ok()?);
     let directory_size = u64::from_le_bytes(zip64_eocd[40..48].try_into().ok()?);
     let directory_offset = u64::from_le_bytes(zip64_eocd[48..56].try_into().ok()?);
-    if entries_on_disk > entries_total
+    // Match zip-rs's locator consistency check, then fail closed on multi-disk records before
+    // trusting their entry counts. The verifier supports single-disk release archives only.
+    if disk_number != locator_disk
+        || disk_with_central_directory != locator_disk
+        || entries_on_disk > entries_total
         || zip64_offset
             < entries_total
                 .saturating_mul(46)
@@ -425,10 +432,19 @@ fn zip64_directory<R: Read + Seek>(reader: &mut R, eocd_offset: u64) -> Option<Z
     if locator[..4] != *b"PK\x06\x07" {
         return None;
     }
+    let locator_disk = u32::from_le_bytes(locator[4..8].try_into().ok()?);
     let relative_offset = u64::from_le_bytes(locator[8..16].try_into().ok()?);
-    if let Some(directory) =
-        zip64_directory_at(reader, relative_offset, locator_offset, relative_offset)
-    {
+    let number_of_disks = u32::from_le_bytes(locator[16..20].try_into().ok()?);
+    if locator_disk != 0 || number_of_disks != 1 {
+        return None;
+    }
+    if let Some(directory) = zip64_directory_at(
+        reader,
+        relative_offset,
+        locator_offset,
+        relative_offset,
+        locator_disk,
+    ) {
         return Some(directory);
     }
 
@@ -452,9 +468,13 @@ fn zip64_directory<R: Read + Seek>(reader: &mut R, eocd_offset: u64) -> Option<Z
                     continue;
                 }
                 let candidate = range_start.checked_add(index as u64)?;
-                if let Some(directory) =
-                    zip64_directory_at(reader, candidate, locator_offset, relative_offset)
-                {
+                if let Some(directory) = zip64_directory_at(
+                    reader,
+                    candidate,
+                    locator_offset,
+                    relative_offset,
+                    locator_disk,
+                ) {
                     return Some(directory);
                 }
             }
