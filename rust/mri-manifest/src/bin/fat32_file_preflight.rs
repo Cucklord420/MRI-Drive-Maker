@@ -23,10 +23,12 @@ fn policy(input: &Value) -> Result<Value, String> {
     if count == 0 {
         return Err("The source contains no files. Preparation was not started.".into());
     }
-    let run_setup = input
-        .get("SetupBatch")
-        .and_then(Value::as_str)
-        .is_some_and(|batch| !batch.trim().is_empty());
+    let setup_batch = input.get("SetupBatch").ok_or("Missing SetupBatch")?;
+    let run_setup = match setup_batch {
+        Value::String(batch) => !batch.trim().is_empty(),
+        Value::Null => false,
+        _ => return Err("Invalid SetupBatch type".into()),
+    };
     if !run_setup {
         for name in required {
             let wanted = name.as_str().ok_or("Required file name is invalid")?;
