@@ -56,6 +56,14 @@ fn block_reason<'a>(disk: &'a Disk, request: &'a Request) -> Option<String> {
             disk.identity_error
         ));
     }
+    // Callers can supply arbitrary JSON keys; never infer a usable hardware
+    // identity from a nonempty key when the serial itself is unavailable.
+    if !identity::serial_is_usable(&disk.serial) {
+        return Some(format!(
+            "Hardware identity unavailable: {}",
+            identity::INVALID_SERIAL_ERROR
+        ));
+    }
     if !same(&disk.bus_type, "USB") || disk.is_boot || disk.is_system {
         return Some("Boot, system, and non-USB disks are excluded.".into());
     }
