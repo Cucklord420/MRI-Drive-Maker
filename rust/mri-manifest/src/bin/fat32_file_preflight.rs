@@ -140,4 +140,26 @@ mod tests {
             "A source file is larger than FAT32 permits."
         );
     }
+    #[test]
+    fn rejects_non_string_setup_batch_instead_of_treating_it_as_direct_copy() {
+        let valid = json!({"Entries":[{"RelativePath":"bootmgr","IsDirectory":false,
+            "Length":10}], "RequiredFiles":["BOOTMGR"], "SetupBatch":""});
+        assert!(policy(&valid).is_ok());
+
+        let mut invalid = valid.clone();
+        invalid["SetupBatch"] = json!(42);
+        assert_eq!(policy(&invalid).unwrap_err(), "Invalid SetupBatch type");
+
+        invalid["SetupBatch"] = json!(false);
+        assert_eq!(policy(&invalid).unwrap_err(), "Invalid SetupBatch type");
+
+        let mut absent = valid.clone();
+        absent.as_object_mut().unwrap().remove("SetupBatch");
+        assert_eq!(policy(&absent).unwrap_err(), "Missing SetupBatch");
+
+        let mut nullable = valid;
+        nullable["SetupBatch"] = Value::Null;
+        assert!(policy(&nullable).is_ok());
+    }
+
 }
