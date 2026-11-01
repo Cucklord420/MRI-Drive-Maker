@@ -163,5 +163,4 @@ mod tests {
         nullable["SetupBatch"] = Value::Null;
         assert!(policy(&nullable).is_ok());
     }
-
 }
