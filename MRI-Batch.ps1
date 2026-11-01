@@ -194,7 +194,15 @@ function Watch-Media {
         $snapshot=Join-Path $run 'config.json'; $manifestPath=Join-Path $run 'source-manifest.json'
         $configHash=Write-MRIJson $snapshot $cfg -PassThruHash
         $manifestHash=Write-MRIJson $manifestPath $manifest -PassThruHash
-        $protected=@(Get-MRIProtectedKeys @($inputPath,$PSScriptRoot,$DataPath) @(Get-MRIInventory))
+        $protectedPaths=@()
+        # The original input is the durable source identity. For archives, the
+        # opened tree is either a read-only optical volume or a cache beneath
+        # DataPath, so resolving that generated path as a physical disk is not
+        # necessary and can fail for optical media with no partition object.
+        foreach ($candidatePath in @($inputPath,$PSScriptRoot,$DataPath)) {
+            $protectedPaths+=([IO.Path]::GetFullPath([string]$candidatePath))
+        }
+        $protected=@(Get-MRIProtectedKeys $protectedPaths @(Get-MRIInventory))
         $module=Join-Path $PSScriptRoot 'MRI.Batch.psm1'
         Write-Host "$($records.Count) selected USBs; maximum $($cfg.MaxParallel) builds at once."
         if ($once) { Write-Host 'This batch ends after each selected USB succeeds or fails. Keep them connected; Q cancels.' }
@@ -251,7 +259,7 @@ function Watch-Media {
                 $statePath=Join-Path $work 'state.json'
                 $receiptPath=Join-Path $DataPath ('Receipts\'+$record.Key+'.json')
                 $approvedNumber=$(if ($once) { [int]$record.ExpectedNumber } else { $null })
-                $job=Start-MRIBuildJob $module $record $snapshot $configHash $manifestPath $manifestHash $protected $statePath $receiptPath $work $cancel -ApprovedEraseNumber $approvedNumber
+                $job=Start-MRIBuildJob $module $record $snapshot $configHash $manifestPath $manifestHash $protected $statePath $receiptPath $work $cancel -ApprovedEraseNumber $approvedNumber -ProtectedPaths $protectedPaths
                 $jobs[$record.Key]=[pscustomobject]@{ Job=$job; Record=$record; StatePath=$statePath; LastStage='' }
                 Write-Host "$($record.Label): detected; build queued."
             }
