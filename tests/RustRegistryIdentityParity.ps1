@@ -63,13 +63,15 @@ try {
             $powershellError = $null
             try { Assert-MRIRegistry -Records $records }
             catch { $powershellError = $_.Exception.Message }
+            $rustErrorProperty = $rust.PSObject.Properties['Error']
+            $rustError = if ($null -eq $rustErrorProperty) { $null } else { [string]$rustErrorProperty.Value }
             if ($null -eq $powershellError) {
-                if ($status -ne 0 -or -not $rust.Ok -or $null -ne $rust.Error) {
-                    throw "Mismatch accepted case $i/$variant Rust=$($rust.Error)"
+                if ($status -ne 0 -or -not $rust.Ok -or $null -ne $rustError) {
+                    throw "Mismatch accepted case $i/$variant Rust=$rustError"
                 }
             } else {
-                if ($status -eq 0 -or $rust.Ok -or $rust.Error -cne $powershellError) {
-                    throw "Mismatch rejected case $i/$variant PS=$powershellError Rust=$($rust.Error)"
+                if ($status -eq 0 -or $rust.Ok -or $rustError -cne $powershellError) {
+                    throw "Mismatch rejected case $i/$variant PS=$powershellError Rust=$rustError"
                 }
             }
             $cases++
