@@ -56,6 +56,14 @@ fn block_reason<'a>(disk: &'a Disk, request: &'a Request) -> Option<String> {
             disk.identity_error
         ));
     }
+    // Callers can supply arbitrary JSON keys; never infer a usable hardware
+    // identity from a nonempty key when the serial itself is unavailable.
+    if !identity::serial_is_usable(&disk.serial) {
+        return Some(format!(
+            "Hardware identity unavailable: {}",
+            identity::INVALID_SERIAL_ERROR
+        ));
+    }
     if !same(&disk.bus_type, "USB") || disk.is_boot || disk.is_system {
         return Some("Boot, system, and non-USB disks are excluded.".into());
     }
@@ -254,6 +262,28 @@ mod tests {
         );
         assert_eq!(respond(&request("\n\t ")).selected, Vec::<i32>::new());
     }
+    #[test]
+    fn unusable_serial_with_forged_key_never_approves_erase() {
+        for serial in [
+            "", " ", "\t", "0", "0000", " 0000 ", "UNKNOWN", "unknown", "N/A", "none",
+        ] {
+            let mut q = request("6,8");
+            q.inventory[0].key = "FORGED_KEY".into();
+            q.inventory[0].serial = serial.into();
+            let result = respond(&q);
+            assert!(result.selected.is_empty(), "serial: {serial:?}");
+            assert!(result.confirmation.is_none(), "serial: {serial:?}");
+            assert_eq!(
+                result.error.as_deref(),
+                Some("Disk 6: Hardware identity unavailable: This drive does not report a usable hardware serial number."),
+                "serial: {serial:?}"
+            );
+        }
+        let mut valid = request("6");
+        valid.inventory[0].serial = "  SERIAL6  ".into();
+        assert_eq!(respond(&valid).selected, vec![6]);
+    }
+
     #[test]
     fn invalid_input_never_yields_partial_selection() {
         for value in ["6;", "6,!", "-1", "6,7,", "6,,7", "abc", "2147483648"] {
