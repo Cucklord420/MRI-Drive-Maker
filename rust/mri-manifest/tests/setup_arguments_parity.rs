@@ -76,7 +76,7 @@ mod windows_oracle {
         let script = r#"
 $ErrorActionPreference = 'Stop'
 Import-Module -Name __MODULE__ -Force -DisableNameChecking
-$cases = Get-Content -LiteralPath __FIXTURE__ -Raw | ConvertFrom-Json
+$cases = Get-Content -LiteralPath __FIXTURE__ -Raw -Encoding UTF8 | ConvertFrom-Json
 $results = New-Object 'System.Collections.Generic.List[object]'
 foreach ($case in $cases) {
     $config = [pscustomobject]@{
