@@ -69,7 +69,10 @@ mod windows_oracle {
         let cases_path = directory.path().join("cases.json");
         fs::write(&cases_path, serde_json::to_vec(&cases).unwrap()).unwrap();
         let original = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../MRI.Batch.psm1");
-        assert!(original.is_file(), "the production PowerShell module is required");
+        assert!(
+            original.is_file(),
+            "the production PowerShell module is required"
+        );
 
         // Rust owns the test and fixtures; the existing original functions are
         // invoked through PowerShell only as the differential oracle.
@@ -134,7 +137,8 @@ ConvertTo-Json -InputObject ($results.ToArray()) -Compress -Depth 20
             let actual: Value =
                 serde_json::from_slice(&output.stdout).expect("Rust CLI must emit JSON");
             assert_eq!(
-                output.status.success(), reference_ok,
+                output.status.success(),
+                reference_ok,
                 "case {case_index}: Rust CLI exit status differs from original; stderr: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
