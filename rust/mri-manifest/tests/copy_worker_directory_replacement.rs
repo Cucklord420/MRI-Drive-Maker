@@ -24,6 +24,14 @@ $branches = @($ast.FindAll({
 if ($branches.Count -ne 1) { throw 'Expected exactly one original copy-worker source-type conditional.' }
 $originalBranch = [ScriptBlock]::Create($branches[0].Extent.Text)
 
+$linkBranches = @($ast.FindAll({
+    param($node)
+    $node -is [System.Management.Automation.Language.IfStatementAst] -and
+    $node.Extent.Text.StartsWith('if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)')
+}, $true))
+if ($linkBranches.Count -ne 1) { throw 'Expected the original copy-worker reparse-point guard.' }
+$originalLinkGuard = [ScriptBlock]::Create($linkBranches[0].Extent.Text)
+
 $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ('mri-dir-type-' + [Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($fixtureRoot)
 try {
@@ -48,7 +56,28 @@ try {
     catch { $rejected = $_.Exception.Message -match 'source changed before copying' }
     if (-not $rejected) { throw 'File manifest accepted a replacement directory.' }
 
-    Write-Host 'PASS: Original copy-worker conditional rejects both source type replacements.'
+    $outside = Join-Path $fixtureRoot 'owned-junction-target'
+    $replacedDirectory = Join-Path $fixtureRoot 'replaced-directory'
+    [void][IO.Directory]::CreateDirectory($outside)
+    [void][IO.Directory]::CreateDirectory($replacedDirectory)
+    [IO.File]::WriteAllText((Join-Path $outside 'sentinel.txt'), 'owned synthetic bytes')
+    [IO.Directory]::Delete($replacedDirectory)
+    & cmd.exe /D /C mklink /J $replacedDirectory $outside | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not create an owned directory-junction fixture.' }
+    $item = Get-Item -LiteralPath $replacedDirectory -Force
+    if (-not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw 'Junction fixture did not have the reparse-point attribute.'
+    }
+    $entry.IsDirectory = $true
+    $rejected = $false
+    try { & $originalLinkGuard | Out-Null }
+    catch { $rejected = $_.Exception.Message -match 'source became a link' }
+    if (-not $rejected) { throw 'Copy worker accepted a directory replaced by a junction.' }
+    if ([IO.File]::ReadAllText((Join-Path $outside 'sentinel.txt')) -cne 'owned synthetic bytes') {
+        throw 'The outside fixture was altered.'
+    }
+
+    Write-Host 'PASS: Copy worker rejects mismatched source types and linked directories.'
 }
 finally {
     [IO.Directory]::Delete($fixtureRoot, $true)
