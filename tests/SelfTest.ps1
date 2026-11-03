@@ -37,13 +37,26 @@ $d=Drive
 $record=[pscustomobject]@{ Key=$d.Key; Serial=$d.Serial; PnpId=$d.PnpId; Model=$d.Model; Size=$d.Size; Label='MRI_01'; AllowErase=$true }
 $sim=[pscustomobject]@{ Inventory=@($d); Source=$source; TargetRoot=''; Letter='R'; CopyCode=0; SetupCode=0; CorruptCopy=$false
     NoPartitions=$false; PartitionError=$false; ActualPartitionStyle='RAW'; CorruptSetup=$false; RemoveDuringCopy=$false; SetupCalls=0; CopyCalls=0; FormatCalls=0; FlushCalls=0; AddOutput=$false; FlushFails=$false; AddCopyExtra=$false; AddFinalExtra=$false; HashCalls=0 }
+$sim | Add-Member -NotePropertyName ProtectionPartitions -NotePropertyValue @()
+$sim | Add-Member -NotePropertyName ProtectionDisks -NotePropertyValue @()
 $module=Get-Module MRI.Batch
 & $module {
     param($sim)
     $script:Sim=$sim
     function script:Get-MRIInventory { $script:Sim.Inventory }
-    function script:Get-Partition { param($DiskNumber); if ($script:Sim.PartitionError) { throw 'No MSFT_Partition objects found.' }; if ($script:Sim.NoPartitions) { return }; [pscustomobject]@{DiskNumber=$DiskNumber; PartitionNumber=1; IsBoot=$false; IsSystem=$false} }
-    function script:Get-Disk { param($Number); [pscustomobject]@{Number=$Number;PartitionStyle=$script:Sim.ActualPartitionStyle} }
+    function script:Get-Partition {
+        [CmdletBinding()] param([int]$DiskNumber)
+        if ($script:Sim.ProtectionPartitions.Count) { return $script:Sim.ProtectionPartitions }
+        if ($script:Sim.PartitionError) { throw 'No MSFT_Partition objects found.' }
+        if ($script:Sim.NoPartitions) { return }
+        [pscustomobject]@{DiskNumber=$DiskNumber; PartitionNumber=1; IsBoot=$false; IsSystem=$false}
+    }
+    function script:Get-Disk {
+        [CmdletBinding()] param([int]$Number)
+        $fixture=@($script:Sim.ProtectionDisks | Where-Object { $_.Number -eq $Number })
+        if ($fixture.Count) { return $fixture }
+        [pscustomobject]@{Number=$Number;PartitionStyle=$script:Sim.ActualPartitionStyle;BusType='SATA'}
+    }
     function script:Get-MRITargetVolume {
         param($Drive)
         [pscustomobject]@{Path=$script:Sim.TargetRoot; Letter=$script:Sim.Letter; Number=$Drive.Number; PartitionNumber=1; FileSystem='FAT32'; FreeBytes=[long]30000000000}
@@ -58,7 +71,7 @@ $module=Get-Module MRI.Batch
         if ($script:Sim.AddFinalExtra) { [IO.File]::WriteAllText((Join-Path $script:Sim.TargetRoot 'unapproved-final.txt'),'unexpected data') }
     }
     function script:Initialize-MRITarget {
-        param($Record,$Config,$ProtectedKeys,$ExpectedNumber,$CancelPath='')
+        param($Record,$Config,$ProtectedKeys,$ExpectedNumber,$CancelPath='',$ProtectedPaths=@())
         Assert-MRINotCancelled $CancelPath
         if (-not $Record.AllowErase) { throw 'This drive was not individually enrolled for automatic erasure.' }
         [void](Assert-MRIDrive $Record $Config $ProtectedKeys $ExpectedNumber)
@@ -91,6 +104,7 @@ function Reset-Case {
     $script:caseRoot=Join-Path $testRoot ([guid]::NewGuid().ToString('N'))
     $sim.TargetRoot=Join-Path $caseRoot 'Target'; [void][IO.Directory]::CreateDirectory($sim.TargetRoot)
     $sim.Inventory=@(Drive); $sim.NoPartitions=$false; $sim.Letter='R'; $sim.CopyCode=0; $sim.SetupCode=0; $sim.CorruptCopy=$false
+    $sim.ProtectionPartitions=@(); $sim.ProtectionDisks=@()
     $sim.CorruptSetup=$false; $sim.RemoveDuringCopy=$false; $sim.SetupCalls=0; $sim.CopyCalls=0; $sim.FormatCalls=0
     $sim.FlushCalls=0; $sim.AddOutput=$false; $sim.FlushFails=$false; $sim.AddCopyExtra=$false
     $sim.AddFinalExtra=$false; $sim.HashCalls=0; $sim.PartitionError=$false; $sim.ActualPartitionStyle='RAW'
@@ -124,6 +138,95 @@ try {
             [void][Management.Automation.Language.Parser]::ParseFile($f.FullName,[ref]$tokens,[ref]$errors)
             Check ($errors.Count -eq 0) "$($f.Name) has parser errors."
         }
+    }
+    Test 'A mounted-folder source protects the USB partition instead of the parent drive' {
+        $hostRoot=[IO.Path]::GetPathRoot($testRoot)
+        $mountRoot=Join-Path $testRoot 'mounted-usb'
+        [void][IO.Directory]::CreateDirectory($mountRoot)
+        $usb=Drive 'MOUNTED-SOURCE' 8 'USB\MOUNTED-SOURCE'
+        $sim.ProtectionPartitions=@(
+            [pscustomobject]@{DiskNumber=0;AccessPaths=@($hostRoot)}
+            [pscustomobject]@{DiskNumber=8;AccessPaths=@($mountRoot+[IO.Path]::DirectorySeparatorChar)}
+        )
+        $sim.ProtectionDisks=@([pscustomobject]@{Number=0;BusType='SATA'})
+        $keys=@(Get-MRIProtectedKeys @((Join-Path $mountRoot 'source.zip')) @($usb))
+        Check ($keys.Count -eq 1 -and $keys[0] -eq $usb.Key) 'The mounted USB identity was not protected.'
+        Throws { Select-MRIUsbDrives '8' @($usb) $cfg $keys } 'contains the source files or the automation'
+    }
+    Test 'A volume GUID source protects its USB partition' {
+        if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+            $volumeRoot='\\?\Volume{01234567-89ab-cdef-0123-456789abcdef}\'
+            $usb=Drive 'VOLUME-GUID-SOURCE' 9 'USB\VOLUME-GUID-SOURCE'
+            $sim.ProtectionPartitions=@(
+                [pscustomobject]@{DiskNumber=0;AccessPaths=@([IO.Path]::GetPathRoot($testRoot))}
+                [pscustomobject]@{DiskNumber=9;AccessPaths=@($volumeRoot)}
+            )
+            $sim.ProtectionDisks=@([pscustomobject]@{Number=0;BusType='SATA'})
+            $keys=@(Get-MRIProtectedKeys @($volumeRoot+'source.iso') @($usb))
+            Check ($keys.Count -eq 1 -and $keys[0] -eq $usb.Key) 'The volume GUID USB identity was not protected.'
+        } else { Write-Host 'SKIP volume GUID normalization requires Windows.' }
+    }
+    Test 'An internal path that shares a parent root does not protect a mounted USB' {
+        $hostRoot=[IO.Path]::GetPathRoot($testRoot)
+        $mountRoot=Join-Path $testRoot 'mounted-usb'
+        $usb=Drive 'MOUNTED-SOURCE' 8 'USB\MOUNTED-SOURCE'
+        $sim.ProtectionPartitions=@(
+            [pscustomobject]@{DiskNumber=0;AccessPaths=@($hostRoot)}
+            [pscustomobject]@{DiskNumber=8;AccessPaths=@($mountRoot+[IO.Path]::DirectorySeparatorChar)}
+        )
+        $sim.ProtectionDisks=@([pscustomobject]@{Number=0;BusType='SATA'})
+        $keys=@(Get-MRIProtectedKeys @((Join-Path $testRoot 'tool.ps1')) @($usb))
+        Check ($keys.Count -eq 0) 'An unrelated USB partition was marked as the source disk.'
+    }
+    Test 'An unresolved path, ambiguous access path, or unidentified USB fails closed' {
+        $unmappedRoot=Join-Path $testRoot 'unmapped-volume'
+        $otherRoot=Join-Path $testRoot 'other-volume'
+        $unmapped=Join-Path $unmappedRoot 'source.iso'
+        $usb=Drive 'UNRESOLVED-SOURCE' 9 'USB\UNRESOLVED-SOURCE'
+        $sim.ProtectionPartitions=@([pscustomobject]@{DiskNumber=0;AccessPaths=@($otherRoot+[IO.Path]::DirectorySeparatorChar)})
+        $sim.ProtectionDisks=@([pscustomobject]@{Number=0;BusType='SATA'})
+        Throws { Get-MRIProtectedKeys @($unmapped) @($usb) } 'Could not map'
+        $sim.ProtectionPartitions=@(
+            [pscustomobject]@{DiskNumber=9;AccessPaths=@($unmappedRoot+[IO.Path]::DirectorySeparatorChar)}
+            [pscustomobject]@{DiskNumber=10;AccessPaths=@($unmappedRoot+[IO.Path]::DirectorySeparatorChar)}
+        )
+        Throws { Get-MRIProtectedKeys @($unmapped) @($usb) } 'multiple partitions'
+        $sim.ProtectionPartitions=@([pscustomobject]@{DiskNumber=9;AccessPaths=@($unmappedRoot+[IO.Path]::DirectorySeparatorChar)})
+        $badUsb=Drive 'UNRESOLVED-SOURCE' 9 'USB\UNRESOLVED-SOURCE'; $badUsb.Key=''
+        Throws { Get-MRIProtectedKeys @($unmapped) @($badUsb) } 'usable hardware identity'
+        $sim.ProtectionDisks=@([pscustomobject]@{Number=9;BusType='USB'})
+        Throws { Get-MRIProtectedKeys @($unmapped) @() } 'usable hardware identity'
+        $sim.ProtectionPartitions=@([pscustomobject]@{DiskNumber=0;AccessPaths=@([IO.Path]::GetPathRoot($testRoot))})
+        $sim.ProtectionDisks=@([pscustomobject]@{Number=0;BusType='Unknown'})
+        Throws { Get-MRIProtectedKeys @((Join-Path $testRoot 'source.iso')) @() } 'physical disk identity'
+    }
+    Test 'A changed source mount is rechecked against the selected disk before erase' {
+        $mountRoot=Join-Path $testRoot 'source-remapped-to-target'
+        $target=Drive 'SOURCE-REMAPPED' 12 'USB\SOURCE-REMAPPED'
+        $sim.Inventory=@($target)
+        $sim.ProtectionPartitions=@(
+            [pscustomobject]@{DiskNumber=0;AccessPaths=@([IO.Path]::GetPathRoot($testRoot))}
+            [pscustomobject]@{DiskNumber=12;AccessPaths=@($mountRoot+[IO.Path]::DirectorySeparatorChar)}
+        )
+        $sim.ProtectionDisks=@([pscustomobject]@{Number=0;BusType='SATA'})
+        Throws { Assert-MRIPathProtection $target @((Join-Path $mountRoot 'source.iso')) } 'now contains a source'
+    }
+    Test 'Fresh erase checks retain source, application, input, and working-data paths' {
+        Reset-Case
+        $inputArchive=Join-Path $testRoot 'source archive.zip'
+        $dataPath=Join-Path $caseRoot 'Data'
+        $cfg.SourcePath=Join-Path $dataPath 'Sources/cache'
+        $cfg | Add-Member -NotePropertyName InputStamp -NotePropertyValue ([pscustomobject]@{Path=$inputArchive}) -Force
+        $work=Join-Path $caseRoot 'Work'; $statePath=Join-Path $work 'state.json'
+        $receiptPath=Join-Path $caseRoot 'Data/Receipts/receipt.json'
+        $extraPath=Join-Path $testRoot 'original-input.iso'
+        $paths=@(Get-MRIResolvedProtectedPaths $cfg @($extraPath,$dataPath) $work $statePath $receiptPath)
+        foreach ($expected in @($inputArchive,$extraPath,$dataPath,$work,$statePath,$receiptPath,
+                ([IO.Path]::GetDirectoryName($receiptPath)),([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($receiptPath))))) {
+            Check ($paths -contains [IO.Path]::GetFullPath($expected)) "A live protected path was lost: $expected"
+        }
+        Check (-not ($paths -contains [IO.Path]::GetFullPath($cfg.SourcePath))) 'An archive cache escaped the protected data directory.'
+        Check ($paths -contains [IO.Path]::GetFullPath((Split-Path $PSScriptRoot -Parent))) 'The application directory was not protected.'
     }
     Test 'C# interop source compiles' { Check ($null -ne ('MRIBatch.NativeProcess' -as [type])) }
     Test 'Source configuration validates' { Assert-MRIConfig $baseConfig }

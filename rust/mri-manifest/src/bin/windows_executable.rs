@@ -122,4 +122,53 @@ mod tests {
         }
         assert!(policy(&json!({"SystemRoot":"","Name":"cmd.exe"})).is_err());
     }
+
+    // Match only supported, read-only path resolution against the original.
+    // Unsafe names are intentionally rejected by Rust's separate unit tests.
+    #[cfg(windows)]
+    #[test]
+    fn matches_original_powershell_for_supported_executable_names() {
+        use std::path::Path;
+        use std::process::Command;
+
+        let module = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../MRI.Batch.psm1");
+        assert!(module.is_file(), "original MRI.Batch.psm1 must be available");
+        let system_root = std::env::var("SystemRoot").expect("Windows SystemRoot must exist");
+        let script = r#"
+$ErrorActionPreference = 'Stop'
+Import-Module -Name $env:MRI_BATCH_MODULE -Force -DisableNameChecking -ErrorAction Stop | Out-Null
+[Console]::Out.Write((Get-MRIWindowsExecutable -Name $env:MRI_EXECUTABLE_NAME))
+"#;
+
+        for name in [
+            "cmd.exe",
+            "WindowsPowerShell\\v1.0\\powershell.exe",
+            "Nested\\custom-tool.exe",
+        ] {
+            let output = Command::new("powershell.exe")
+                .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script])
+                .env("MRI_BATCH_MODULE", &module)
+                .env("MRI_EXECUTABLE_NAME", name)
+                .output()
+                .expect("Windows PowerShell 5.1 is required for differential tests");
+            assert!(
+                output.status.success(),
+                "original executable resolver failed for {name}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let original = String::from_utf8(output.stdout)
+                .expect("original executable resolver must output UTF-8");
+            let resolved = policy(&json!({"SystemRoot": system_root.as_str(), "Name": name}))
+                .expect("Rust resolver should accept supported executable")
+                .as_str()
+                .expect("Rust resolver should return a path string")
+                .to_owned();
+            assert_eq!(
+                resolved,
+                original.trim(),
+                "original PowerShell and Rust disagree for {name}"
+            );
+        }
+    }
+
 }
