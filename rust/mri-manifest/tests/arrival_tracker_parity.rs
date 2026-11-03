@@ -40,8 +40,7 @@ mod windows_oracle {
                         "Size": 32_000_000
                     })]
                 };
-                let protected_keys: Vec<&str> =
-                    if n % 11 == 0 { vec![key] } else { Vec::new() };
+                let protected_keys: Vec<&str> = if n % 11 == 0 { vec![key] } else { Vec::new() };
                 json!({
                     "Inventory": inventory,
                     "Records": [{"Key": "disk-x", "Label": "MRI_01"}],
@@ -66,7 +65,10 @@ mod windows_oracle {
         let cases_path = directory.path().join("cases.json");
         fs::write(&cases_path, serde_json::to_vec(&fixtures).unwrap()).unwrap();
         let module = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../MRI.Batch.psm1");
-        assert!(module.is_file(), "the original production module is required");
+        assert!(
+            module.is_file(),
+            "the original production module is required"
+        );
 
         // The harness is Rust; PowerShell is invoked only to run the existing
         // original functions as the differential oracle.
@@ -125,7 +127,9 @@ ConvertTo-Json -InputObject ($results.ToArray()) -Compress -Depth 20
                 "Tracker": fixture["Tracker"]
             });
             let inventory = request["Inventory"].as_array_mut().unwrap();
-            let blocked = oracle["Blocked"].as_array().expect("one block decision per drive");
+            let blocked = oracle["Blocked"]
+                .as_array()
+                .expect("one block decision per drive");
             assert_eq!(blocked.len(), inventory.len(), "case {case_index}");
             for (drive, decision) in inventory.iter_mut().zip(blocked) {
                 drive["Blocked"] = Value::Bool(decision.as_bool().unwrap());
