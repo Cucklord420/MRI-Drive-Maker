@@ -20,7 +20,9 @@ fn powershell(script: &str, source: &Path, fixture: Option<&Path>) -> Output {
     if let Some(path) = fixture {
         command.env("MRI_PARITY_INPUT", path);
     }
-    let output = command.output().expect("Windows PowerShell must be available");
+    let output = command
+        .output()
+        .expect("Windows PowerShell must be available");
     assert!(
         output.status.success(),
         "PowerShell harness failed: stdout={} stderr={}",
@@ -142,6 +144,9 @@ fn source_stamp_matches_original_powershell_across_twenty_windows_cases() {
         let original = original_accepts(&source, &fixture);
         let rust = rust_accepts(&fixture);
         assert_eq!(original, expected, "original PowerShell case {case}");
-        assert_eq!(rust, original, "Rust versus original PowerShell case {case}");
+        assert_eq!(
+            rust, original,
+            "Rust versus original PowerShell case {case}"
+        );
     }
 }
