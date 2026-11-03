@@ -223,5 +223,4 @@ mod tests {
             assert!(verify(root, Some(&case_variant)).unwrap());
         }
     }
-
 }
