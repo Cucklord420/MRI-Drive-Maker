@@ -132,7 +132,10 @@ mod tests {
         use std::process::Command;
 
         let module = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../MRI.Batch.psm1");
-        assert!(module.is_file(), "original MRI.Batch.psm1 must be available");
+        assert!(
+            module.is_file(),
+            "original MRI.Batch.psm1 must be available"
+        );
         let system_root = std::env::var("SystemRoot").expect("Windows SystemRoot must exist");
         let script = r#"
 $ErrorActionPreference = 'Stop'
@@ -146,7 +149,13 @@ Import-Module -Name $env:MRI_BATCH_MODULE -Force -DisableNameChecking -ErrorActi
             "Nested\\custom-tool.exe",
         ] {
             let output = Command::new("powershell.exe")
-                .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script])
+                .args([
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    script,
+                ])
                 .env("MRI_BATCH_MODULE", &module)
                 .env("MRI_EXECUTABLE_NAME", name)
                 .output()
@@ -170,5 +179,4 @@ Import-Module -Name $env:MRI_BATCH_MODULE -Force -DisableNameChecking -ErrorActi
             );
         }
     }
-
 }
