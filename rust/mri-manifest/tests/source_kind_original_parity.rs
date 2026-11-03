@@ -70,8 +70,8 @@ fn source_kind_matches_original_powershell_on_synthetic_cases() {
             "original PowerShell oracle failed for case {index}: {}",
             String::from_utf8_lossy(&original.stderr)
         );
-        let original_result = String::from_utf8(original.stdout)
-            .expect("original decision is UTF-8");
+        let original_result =
+            String::from_utf8(original.stdout).expect("original decision is UTF-8");
         let original_result = original_result.trim();
 
         let rust = Command::new(rust_binary)
