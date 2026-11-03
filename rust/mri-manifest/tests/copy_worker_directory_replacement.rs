@@ -80,6 +80,13 @@ try {
     Write-Host 'PASS: Copy worker rejects mismatched source types and linked directories.'
 }
 finally {
+    # .NET Framework's recursive delete cannot remove a Windows junction.
+    # Unlink only our synthetic reparse point, without traversing its target.
+    $ownedJunction = Join-Path $fixtureRoot 'replaced-directory'
+    if ([IO.Directory]::Exists($ownedJunction) -and
+        ([IO.File]::GetAttributes($ownedJunction) -band [IO.FileAttributes]::ReparsePoint)) {
+        [IO.Directory]::Delete($ownedJunction)
+    }
     [IO.Directory]::Delete($fixtureRoot, $true)
 }
 "#;
