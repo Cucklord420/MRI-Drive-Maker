@@ -12,6 +12,11 @@ on:
 permissions:
   contents: read
 
+# Cancel superseded runs per event; keep push and pull_request checks independent.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}-${{ (github.event_name == 'workflow_dispatch' || github.run_attempt != '1') && github.run_id || 'automatic' }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' && github.run_attempt == '1' }}
+
 jobs:
   analyze:
     name: PSScriptAnalyzer (errors)
@@ -23,16 +28,108 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install PSScriptAnalyzer
+      - name: Verify PSScriptAnalyzer and analyze source
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          Install-Module PSScriptAnalyzer -Repository PSGallery -Scope CurrentUser -Force -ErrorAction Stop
+          $ProgressPreference = 'SilentlyContinue'
+          $version = '1.25.0'
+          $expectedPackageSha512 = 'E7FB573262E604BAB29914AE62921D24B97C2F88B519B41277B403EF6CE163F14B7D1B36DC73449A68E5AE5A8D9502891B10C264131FD1813ADF29BF131C1663'
+          $expectedSignerSha256 = 'B41C444F8CBD49D1B27CC2C76E0F3FB042BF9970B6B6F6B57FC8976514B03952'
+          $packagePath = Join-Path $env:RUNNER_TEMP "PSScriptAnalyzer.$version.zip"
+          $moduleRoot = Join-Path $env:RUNNER_TEMP "PSScriptAnalyzer.$version"
+          $manifestPath = Join-Path $moduleRoot 'PSScriptAnalyzer.psd1'
+          $scriptPath = Join-Path $moduleRoot 'PSScriptAnalyzer.psm1'
+          $expectedModuleVersion = [version]$version
 
-      - name: Check PowerShell scripts and modules
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
+          function Get-VerifiedPackageSha512 {
+            param([string]$Path, [string]$ExpectedSha512)
+            $actualSha512 = (Get-FileHash -LiteralPath $Path -Algorithm SHA512).Hash
+            if ($actualSha512 -cne $ExpectedSha512) {
+              throw 'PSScriptAnalyzer package SHA-512 did not match the reviewed artifact.'
+            }
+            return $actualSha512
+          }
+
+          function Get-VerifiedSignerSha256 {
+            param([string]$Path, [string]$ExpectedSha256)
+            $signature = Get-AuthenticodeSignature -FilePath $Path
+            if ($signature.Status -ne 'Valid' -or $null -eq $signature.SignerCertificate) {
+              throw "PSScriptAnalyzer Authenticode verification failed for $([IO.Path]::GetFileName($Path)): $($signature.Status)."
+            }
+
+            $sha256 = [System.Security.Cryptography.SHA256]::Create()
+            try {
+              $signerSha256 = [BitConverter]::ToString(
+                $sha256.ComputeHash($signature.SignerCertificate.RawData)
+              ).Replace('-', '')
+            }
+            finally {
+              $sha256.Dispose()
+            }
+
+            if ($signerSha256 -cne $ExpectedSha256) {
+              throw "PSScriptAnalyzer signer certificate did not match the reviewed Microsoft certificate for $([IO.Path]::GetFileName($Path))."
+            }
+            return $signerSha256
+          }
+
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          Invoke-WebRequest `
+            -Uri "https://www.powershellgallery.com/api/v2/package/PSScriptAnalyzer/$version" `
+            -OutFile $packagePath -UseBasicParsing -ErrorAction Stop
+
+          $packageSha512 = Get-VerifiedPackageSha512 -Path $packagePath -ExpectedSha512 $expectedPackageSha512
+
+          $tamperedPackagePath = Join-Path $env:RUNNER_TEMP "PSScriptAnalyzer.$version.tampered.zip"
+          Copy-Item -LiteralPath $packagePath -Destination $tamperedPackagePath -ErrorAction Stop
+          $tamperedStream = [IO.File]::Open(
+            $tamperedPackagePath, [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::None
+          )
+          try {
+            $tamperedStream.WriteByte([byte]0)
+          }
+          finally {
+            $tamperedStream.Dispose()
+          }
+          $tamperRejected = $false
+          try {
+            Get-VerifiedPackageSha512 -Path $tamperedPackagePath -ExpectedSha512 $expectedPackageSha512 | Out-Null
+          }
+          catch {
+            if ($_.Exception.Message -ne 'PSScriptAnalyzer package SHA-512 did not match the reviewed artifact.') { throw }
+            $tamperRejected = $true
+          }
+          finally {
+            Remove-Item -LiteralPath $tamperedPackagePath -Force -ErrorAction SilentlyContinue
+          }
+          if (-not $tamperRejected) { throw 'The package digest check accepted a tampered package fixture.' }
+
+          Expand-Archive -LiteralPath $packagePath -DestinationPath $moduleRoot -ErrorAction Stop
+          $verifiedSignerSha256 = @()
+          foreach ($signedPath in @($manifestPath, $scriptPath)) {
+            $verifiedSignerSha256 += Get-VerifiedSignerSha256 -Path $signedPath -ExpectedSha256 $expectedSignerSha256
+          }
+
+          $unexpectedSignerRejected = $false
+          try {
+            Get-VerifiedSignerSha256 -Path $manifestPath -ExpectedSha256 ('0' * 64) | Out-Null
+          }
+          catch {
+            if ($_.Exception.Message -notlike 'PSScriptAnalyzer signer certificate did not match*') { throw }
+            $unexpectedSignerRejected = $true
+          }
+          if (-not $unexpectedSignerRejected) { throw 'The publisher check accepted an unexpected signer fixture.' }
+
+          Import-Module -Name $manifestPath -Force -ErrorAction Stop
+          $loadedModules = @(Get-Module -Name PSScriptAnalyzer)
+          if ($loadedModules.Count -ne 1 -or $loadedModules[0].Version -ne $expectedModuleVersion) {
+            throw "Loaded PSScriptAnalyzer version did not match $version."
+          }
+
+          Write-Output "Verified PSScriptAnalyzer $version; package SHA-512: $packageSha512"
+          Write-Output "Verified PSScriptAnalyzer Authenticode signer SHA-256: $($verifiedSignerSha256[0])"
+          Write-Output 'Adversarial pin checks rejected tampered package bytes and an unexpected signer.'
           $issues = @(Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error -ErrorAction Stop)
           if ($issues.Count -gt 0) {
             $issues | Format-Table -AutoSize | Out-String | Write-Output
