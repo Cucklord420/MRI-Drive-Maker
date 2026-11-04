@@ -136,7 +136,6 @@ function Expand-MRIArchive {
     Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $base=[IO.Path]::GetFullPath($Destination).TrimEnd([char[]]@('\','/'))+[IO.Path]::DirectorySeparatorChar
-    [void][IO.Directory]::CreateDirectory($base)
     $archive=[IO.Compression.ZipFile]::OpenRead($Path)
     try {
         $names=@{}; $total=[long]0
@@ -145,10 +144,34 @@ function Expand-MRIArchive {
             if (-not $relative) { continue }
             [void](ConvertTo-MRIRelativePath $relative)
             if ($names.ContainsKey($relative)) { throw "Duplicate archive path: $relative" }; $names[$relative]=$true
-            $total+=$entry.Length
-            if ($total -gt 64GB -or $names.Count -gt 100000) { throw 'The ZIP exceeds the supported source size or entry count.' }
+            # Reject impossible/oversized metadata before accumulating bytes.
+            if ($entry.Length -lt 0 -or $entry.Length -gt (64GB - $total) -or $names.Count -gt 100000) {
+                throw 'The ZIP exceeds the supported source size or entry count.'
+            }
+            $total+=[long]$entry.Length
             if (($entry.ExternalAttributes -shr 16 -band 0xF000) -eq 0xA000) { throw 'ZIP symbolic links are not supported.' }
         }
+        # Resolve the actual destination volume (including directory mounts)
+        # from an existing ancestor, before creating any extraction output.
+        $cacheParent=[IO.Path]::GetFullPath($Destination)
+        while (-not [IO.Directory]::Exists($cacheParent)) {
+            $parent=[IO.Path]::GetDirectoryName($cacheParent.TrimEnd([char[]]@('\','/')))
+            if (-not $parent -or $parent -eq $cacheParent) { throw 'Cannot locate an existing MRI cache parent directory.' }
+            $cacheParent=$parent
+        }
+        Assert-MRIPlainDirectory $cacheParent
+        $volumes=@(Get-Volume -FilePath $cacheParent -ErrorAction Stop)
+        if ($volumes.Count -ne 1 -or $null -eq $volumes[0].SizeRemaining) {
+            throw 'Cannot determine available cache space on the destination volume.'
+        }
+        $available=[long]$volumes[0].SizeRemaining
+        if ($available -lt 0) { throw 'Cannot determine available cache space on the destination volume.' }
+        # Keep a GiB plus 10% of the advertised expanded payload as headroom
+        # for allocation/metadata overhead. Concurrent disk usage can still
+        # exhaust space; Open-MRISource cleans its owned cache on failure.
+        $required=[long]($total + [long][Math]::Ceiling($total * 0.10) + 1GB)
+        if ($available -lt $required) { throw 'Insufficient free space on the MRI cache volume.' }
+        [void][IO.Directory]::CreateDirectory($base)
         foreach ($entry in $archive.Entries) {
             $relative=$entry.FullName.Replace('/','\').TrimEnd('\')
             if (-not $relative) { continue }
