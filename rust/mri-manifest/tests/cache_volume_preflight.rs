@@ -95,9 +95,15 @@ function Expect-NoExtract {
     param([string]$Zip, [string]$Target, [string]$ExpectedMessage)
     $before = $script:VolumeQueries
     $rejected = $false
+    $observed = 'no exception'
     try { Expand-MRIArchive $Zip $Target }
-    catch { $rejected = $_.Exception.Message.Contains($ExpectedMessage) }
-    if (-not $rejected) { throw "The ZIP was not rejected for: $ExpectedMessage" }
+    catch {
+        $observed = $_.Exception.ToString()
+        $rejected = $_.Exception.Message.Contains($ExpectedMessage)
+    }
+    if (-not $rejected) {
+        throw "ZIP preflight mismatch ($ExpectedMessage); observed: $observed"
+    }
     if ([IO.Directory]::Exists($Target)) {
         throw 'Rejected ZIP created a cache directory before preflight.'
     }
