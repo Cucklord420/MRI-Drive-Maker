@@ -71,6 +71,26 @@ function New-SyntheticZip {
     } finally { $zip.Dispose() }
 }
 
+function Set-ZipAdvertisedSizesNearFourGiB {
+    param([string]$Path, [int]$ExpectedCount)
+    # Only modify central-directory uncompressed-size metadata. ZIP entries
+    # remain a few synthetic bytes; never allocate the advertised gigabytes.
+    [byte[]]$bytes = [IO.File]::ReadAllBytes($Path)
+    $patched = 0
+    for ($i = 0; $i -le ($bytes.Length - 46); $i++) {
+        if ($bytes[$i] -eq 0x50 -and $bytes[$i + 1] -eq 0x4b -and
+            $bytes[$i + 2] -eq 0x01 -and $bytes[$i + 3] -eq 0x02) {
+            $bytes[$i + 24] = 0xFE
+            $bytes[$i + 25] = 0xFF
+            $bytes[$i + 26] = 0xFF
+            $bytes[$i + 27] = 0xFF
+            $patched++
+        }
+    }
+    if ($patched -ne $ExpectedCount) { throw 'Synthetic ZIP metadata patch count was incorrect.' }
+    [IO.File]::WriteAllBytes($Path, $bytes)
+}
+
 function Expect-NoExtract {
     param([string]$Zip, [string]$Target, [string]$ExpectedMessage)
     $before = $script:VolumeQueries
@@ -114,6 +134,28 @@ try {
     $script:FailVolumeQuery = $true
     Expect-NoExtract $zipPath (Join-Path $cache 'unavailable') 'Synthetic volume query unavailable'
     $script:FailVolumeQuery = $false
+
+    # Sixteen tiny entries can advertise 64 GiB minus 32 bytes, whereas
+    # seventeen exceed the 64 GiB ceiling. Both tests write only small ZIPs.
+    $near = Join-Path $root 'near-limit.zip'
+    New-SyntheticZip $near @((1..16) | ForEach-Object { "part$_.bin" })
+    Set-ZipAdvertisedSizesNearFourGiB $near 16
+    $script:AvailableBytes = [long]1
+    Expect-NoExtract $near (Join-Path $cache 'near-limit') 'Insufficient free space'
+
+    $above = Join-Path $root 'above-limit.zip'
+    New-SyntheticZip $above @((1..17) | ForEach-Object { "part$_.bin" })
+    Set-ZipAdvertisedSizesNearFourGiB $above 17
+    $before = $script:VolumeQueries
+    $sizeRejected = $false
+    try { Expand-MRIArchive $above (Join-Path $cache 'above-limit') }
+    catch { $sizeRejected = $_.Exception.Message.Contains('supported source size') }
+    if (-not $sizeRejected -or [IO.Directory]::Exists((Join-Path $cache 'above-limit'))) {
+        throw 'An over-limit ZIP was not rejected before extraction.'
+    }
+    if ($script:VolumeQueries -ne $before) {
+        throw 'Over-limit ZIP metadata did not fail before the volume query.'
+    }
 
     $script:AvailableBytes = [long](3GB)
     $good = Join-Path $cache 'good'
