@@ -102,7 +102,9 @@ function Expect-NoExtract {
         $rejected = $_.Exception.Message.Contains($ExpectedMessage)
     }
     if (-not $rejected) {
-        throw "ZIP preflight mismatch ($ExpectedMessage); observed: $observed"
+        $actualCommand = (Get-Command Expand-MRIArchive).ScriptBlock.ToString()
+        $hasGuard = $actualCommand.Contains('Insufficient free space')
+        throw "ZIP preflight mismatch ($ExpectedMessage); observed: $observed; available=$script:AvailableBytes; volume-queries=$script:VolumeQueries; guard-present=$hasGuard; output-exists=$([IO.Directory]::Exists($Target))"
     }
     if ([IO.Directory]::Exists($Target)) {
         throw 'Rejected ZIP created a cache directory before preflight.'
