@@ -211,7 +211,10 @@ fn original_zip_cache_fails_closed_on_low_space_and_cleans_partial_extracts() {
     let module = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join("MRI.Batch.psm1");
-    assert!(module.is_file(), "Original MRI PowerShell module is missing");
+    assert!(
+        module.is_file(),
+        "Original MRI PowerShell module is missing"
+    );
     let output = Command::new("powershell.exe")
         .args(["-NoProfile", "-NonInteractive", "-Command", WINDOWS_FIXTURE])
         .env("MRI_ORIGINAL_MODULE", &module)
