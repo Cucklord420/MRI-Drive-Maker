@@ -48,7 +48,7 @@ function Get-MRIMediaRoot { param([string]$Root) throw 'Unexpected complete extr
 $script:AvailableBytes = [long]1
 $script:FailVolumeQuery = $false
 $script:VolumeQueries = 0
-function Get-Volume {
+function Get-MockedMRIVolume {
     [CmdletBinding()]
     param([string]$FilePath)
     $script:VolumeQueries++
@@ -58,6 +58,16 @@ function Get-Volume {
     }
     return [pscustomobject]@{ SizeRemaining = $script:AvailableBytes }
 }
+
+# PowerShell command binding can retain the Storage cmdlet even when a
+# same-named test function exists. Replace exactly one external dependency
+# in the parsed original function body; all ZIP and safety logic is unchanged.
+$originalExtractor = (Get-Command Expand-MRIArchive).ScriptBlock.ToString()
+if ([regex]::Matches($originalExtractor, 'Get-Volume -FilePath').Count -ne 1) {
+    throw 'The extractor volume-query seam has changed.'
+}
+$fixtureExtractor = $originalExtractor.Replace('Get-Volume -FilePath', 'Get-MockedMRIVolume -FilePath')
+Set-Item -Path Function:\Expand-MRIArchive -Value ([ScriptBlock]::Create($fixtureExtractor))
 
 function New-SyntheticZip {
     param([string]$Path, [string[]]$Entries)
