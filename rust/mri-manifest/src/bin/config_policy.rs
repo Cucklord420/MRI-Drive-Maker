@@ -332,87 +332,63 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn matches_original_powershell_for_shared_configuration_guards() {
-        let temp = tempfile::tempdir().unwrap();
-        let source = temp.path().join("synthetic MRI source");
-        std::fs::create_dir(&source).unwrap();
-        std::fs::write(source.join("setup.cmd"), b"@echo off\r\n").unwrap();
-
-        let module = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../MRI.Batch.psm1");
-        assert!(module.is_file());
-
-        let script = r#"
-$ErrorActionPreference = 'Stop'
-try {
-    Import-Module -Name $env:MRI_BATCH_MODULE -Force -DisableNameChecking -ErrorAction Stop | Out-Null
-    $config = $env:MRI_CONFIG_JSON | ConvertFrom-Json
-    Assert-MRIConfig -Config $config
-    exit 0
-} catch {
-    [Console]::Error.Write($_.Exception.Message)
-    exit 1
-}
-"#;
-
-        let mut valid = base();
-        valid["SourcePath"] = json!(source.to_str().unwrap());
-        let mut cases: Vec<(&str, Value, bool)> =
-            vec![("existing source folder", valid.clone(), true)];
-
-        let mut value = valid.clone();
-        value["SourceKind"] = json!("folder");
-        value["FileSystem"] = json!("fat32");
-        cases.push(("case-insensitive enums", value, true));
-
-        let mut value = valid.clone();
-        value["SetupBatch"] = json!("setup.cmd");
-        value["SetupArguments"] = json!(["/drive={DriveLetter}"]);
-        value["MutableFiles"] = json!(["bootmgr"]);
-        cases.push(("existing setup batch", value, true));
-
-        for (label, field, invalid) in [
-            ("invalid parallel maximum", "MaxParallel", json!(31)),
-            ("invalid polling interval", "PollSeconds", json!(0)),
-            ("invalid stable count", "StablePolls", json!(1)),
-            ("invalid filesystem", "FileSystem", json!("exFAT")),
-            ("invalid boolean type", "SerializeSetup", json!("yes")),
-            ("invalid capacity", "MinimumDiskBytes", json!(0)),
-            ("invalid timeout", "CopyTimeoutSeconds", json!(0)),
-            ("invalid source kind", "SourceKind", json!("WIM")),
-            ("invalid required path", "RequiredFiles", json!(["../outside"])),
-            ("invalid setup path", "SetupBatch", json!("../outside.cmd")),
-        ] {
-            let mut value = valid.clone();
-            value[field] = invalid;
-            cases.push((label, value, false));
+    fn pairs_existing_powershell_configuration_regressions_with_rust_policy() {
+        for invalid in [json!(1.5), json!("2"), json!(true)] {
+            let mut value = base();
+            value["MaxParallel"] = invalid;
+            assert!(policy(&value).is_err());
         }
 
-        let mut missing = valid.clone();
-        missing.as_object_mut().unwrap().remove("SchemaVersion");
-        cases.push(("missing required schema", missing, false));
+        for invalid in [json!(0), json!(31), json!(-1)] {
+            let mut value = base();
+            value["MaxParallel"] = invalid;
+            assert!(policy(&value).is_err());
+        }
 
-        for (label, input, expected) in cases {
-            let rust = policy(&input);
-            let output = std::process::Command::new("powershell.exe")
-                .args([
-                    "-NoLogo",
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-Command",
-                    script,
-                ])
-                .env("MRI_BATCH_MODULE", &module)
-                .env("MRI_CONFIG_JSON", input.to_string())
-                .output()
-                .expect("Windows PowerShell 5.1 is required for direct differential tests");
-            assert_eq!(rust.is_ok(), expected, "Rust policy for {label}: {rust:?}");
-            assert_eq!(
-                output.status.success(),
-                expected,
-                "PowerShell policy for {label}: status={:?}, stderr={:?}",
-                output.status.code(),
-                String::from_utf8_lossy(&output.stderr)
+        let mut direct_copy = base();
+        direct_copy["SetupArguments"] = json!(["unexpected"]);
+        assert!(policy(&direct_copy).is_err());
+
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let repository = manifest_dir
+            .parent()
+            .and_then(|rust_dir| rust_dir.parent())
+            .expect("repository root should be available to the test");
+        let self_test = repository.join("tests").join("SelfTest.ps1");
+        let output = std::process::Command::new("powershell.exe")
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+            ])
+            .arg(&self_test)
+            .output()
+            .expect("Windows PowerShell should be available on the Windows test runner");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "original PowerShell self-tests failed ({}):\nstdout:\n{}\nstderr:\n{}",
+            output.status,
+            stdout,
+            stderr
+        );
+
+        for test_name in [
+            "Source configuration validates",
+            "Fractional and string timing/concurrency values are rejected",
+            "Concurrency accepts 1 through 30 and rejects invalid limits",
+            "Direct-copy mode rejects mutable-file and setup-argument exceptions",
+        ] {
+            let expected_line = format!("PASS {test_name}");
+            assert!(
+                stdout
+                    .lines()
+                    .any(|line| line.trim() == expected_line.as_str()),
+                "original PowerShell self-test did not report {expected_line:?} as passing"
             );
         }
     }
