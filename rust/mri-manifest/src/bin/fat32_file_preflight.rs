@@ -163,4 +163,80 @@ mod tests {
         nullable["SetupBatch"] = Value::Null;
         assert!(policy(&nullable).is_ok());
     }
+
+    #[cfg(windows)]
+    #[test]
+    fn paired_original_powershell_preflight_regressions_match_rust_policy() {
+        let oversized = json!({
+            "Entries": [{"RelativePath":"payload.dat","IsDirectory":false,
+                "Length":4_294_967_296_u64}],
+            "RequiredFiles": [],
+            "SetupBatch": "mri.bat"
+        });
+        assert_eq!(
+            policy(&oversized).unwrap_err(),
+            "A source file is larger than FAT32 permits."
+        );
+
+        let missing_required = json!({
+            "Entries": [{"RelativePath":"payload.dat","IsDirectory":false,"Length":12}],
+            "RequiredFiles": ["missing-efi.bin"],
+            "SetupBatch": ""
+        });
+        assert_eq!(
+            policy(&missing_required).unwrap_err(),
+            "Required boot file is missing from the source: missing-efi.bin"
+        );
+
+        let empty_source = json!({
+            "Entries": [],
+            "RequiredFiles": [],
+            "SetupBatch": ""
+        });
+        assert_eq!(
+            policy(&empty_source).unwrap_err(),
+            "The source contains no files. Preparation was not started."
+        );
+
+        let repository = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("repository root should be available to the test");
+        let self_test = repository.join("tests").join("SelfTest.ps1");
+        let output = std::process::Command::new("powershell.exe")
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+            ])
+            .arg(&self_test)
+            .output()
+            .expect("Windows PowerShell should be available on the Windows test runner");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "original PowerShell self-tests failed ({}):\nstdout:\n{}\nstderr:\n{}",
+            output.status,
+            stdout,
+            stderr
+        );
+
+        for test_name in [
+            "FAT32 oversized source file is rejected before copy",
+            "Missing source boot files block direct-copy preparation before erasure",
+            "An empty source cannot reach preparation even with no required filenames",
+        ] {
+            let expected_line = format!("PASS {test_name}");
+            assert!(
+                stdout
+                    .lines()
+                    .any(|line| line.trim() == expected_line.as_str()),
+                "original PowerShell self-test did not report {expected_line:?} as passing"
+            );
+        }
+    }
 }
