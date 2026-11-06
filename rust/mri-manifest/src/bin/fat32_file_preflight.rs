@@ -198,9 +198,10 @@ mod tests {
             "The source contains no files. Preparation was not started."
         );
 
-        let repository = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .canonicalize()
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let repository = manifest_dir
+            .parent()
+            .and_then(|rust_dir| rust_dir.parent())
             .expect("repository root should be available to the test");
         let self_test = repository.join("tests").join("SelfTest.ps1");
         let output = std::process::Command::new("powershell.exe")
