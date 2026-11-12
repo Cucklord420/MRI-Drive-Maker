@@ -1,6 +1,6 @@
 # MRI Drive Maker
 
-[Download v0.3.0](https://github.com/Cucklord420/MRI-Drive-Maker/raw/refs/heads/main/downloads/MRI-Drive-Maker-v0.3.0.zip). Extract the whole ZIP, then right-click **START-MRI-DRIVE-MAKER.cmd → Run as administrator**. This is the only launcher you need.
+**For current source fixes:** On [the repository page](https://github.com/Cucklord420/MRI-Drive-Maker), choose **Code → Download ZIP** and extract it completely, then right-click **START-MRI-DRIVE-MAKER.cmd → Run as administrator**. The launcher also works from the repository root. The [published v0.3.0 download](https://github.com/Cucklord420/MRI-Drive-Maker/raw/refs/heads/main/downloads/MRI-Drive-Maker-v0.3.0.zip) is an older frozen build **without serial-less USB support**; it has not been republished.
 
 Lists USBs, cleans the drives you select, formats them as FAT32, and copies your source folder's contents directly to each USB root. Several drives build at once. No BDE utility or setup batch is required.
 
@@ -13,13 +13,13 @@ Lists USBs, cleans the drives you select, formats them as FAT32, and copies your
 
 New configurations allow **4 simultaneous builds**. Choose **4** in the menu to set **1–30**; existing saved limits are preserved. Remaining selected drives wait for a slot. Shared hubs and USB controllers share bandwidth, so 30 slots is not a measured 30-drive speedup. Press **Q** during a session to cancel unfinished builds.
 
-The download contains the launcher, this quick guide, license/notices, and editable source/tests inside **App/**. Configuration and **Data/** are created beside the launcher. Historical launchers and test reports stay in this repository, outside the download.
+The published v0.3.0 download contains the launcher, quick guide, license/notices, and editable source/tests inside **App/**. The repository source ZIP keeps those files at the repository root. Configuration and **Data/** are created beside the launcher. Historical launchers and test reports stay in this repository, outside the download.
 
 ## What happens to a drive
 
 The selected batch cleans existing partitions, creates one active MBR/FAT32 partition using up to **32,000,000,000 bytes**, and copies the source contents to its root. Additional drive capacity remains unused. Each copied file is checked with SHA-256 after writes are flushed; failed or interrupted builds never receive a new success receipt. No report or marker is added to the USB.
 
-Physical identity is checked again before storage operations. System/boot disks, source/application disks, non-USB disks, offline/write-protected disks, and missing or duplicate hardware serials are blocked. If a selected drive disappears or its disk number changes while waiting, its build fails rather than following another disk.
+Drive identity is checked again before storage operations. System/boot disks, source/application disks, non-USB disks, offline/write-protected disks, and ambiguous identities are blocked. For the manually selected **menu 2** batch only, a USB without a usable serial (for example, two identical Kanguru FLASHBLU drives reporting `0`) can use an unambiguous Windows connection path plus PNP ID, model and size. This is **not permanent hardware identity**: do not unplug, swap, or move these drives during a build, and verify the displayed disk numbers before typing `ERASE`. A missing connection path or changed disk number blocks the build. The registered automatic watcher continues to require usable unique hardware serials.
 
 Empty sources, files larger than FAT32 permits, insufficient capacity, unsafe paths, and source links/junctions are rejected. ISO files are mounted read-only; ZIP files use a temporary extraction cache. A selected folder's contents are copied exactly, without silently flattening a child directory.
 
