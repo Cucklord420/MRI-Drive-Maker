@@ -47,7 +47,8 @@ try {
         param([int]$Number,[string]$Device)
         $pnp=('USBSTOR\\KANGURU\\'+$Device)
         $diskPath=('\\\\?\\USBSTOR#KANGURU#'+$Device)
-        [pscustomobject]@{Number=$Number;Serial='0';PnpId=$pnp;DiskPath=$diskPath;Model='KANGURU FLASHBLU';Size=[long]31000000000
+        [pscustomobject]@{Number=$Number;Serial='0';PnpId=$pnp;DiskPath=$diskPath;SessionNoSerial=$true
+            Model='KANGURU FLASHBLU';Size=[long]31000000000
             Key=(Get-MRINoSerialDriveKey $pnp $diskPath 'KANGURU FLASHBLU' 31000000000)
             IsBoot=$false;IsSystem=$false;IsReadOnly=$false;IsOffline=$false;BusType='USB';IdentityError=''}
     }
