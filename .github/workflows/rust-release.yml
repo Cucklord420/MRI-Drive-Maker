@@ -81,7 +81,7 @@ jobs:
 
   publish-v031:
     name: Publish MRI Drive Maker v0.3.1 after verified main merge
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'release(mri): publish v0.3.1')
+    if: "github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'release(mri): publish v0.3.1')"
     needs: [rust-release-verification, windows-release-smoke]
     runs-on: windows-latest
     timeout-minutes: 20
