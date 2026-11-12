@@ -78,6 +78,16 @@ jobs:
         run: |
           & ./tests/PackageSmoke.ps1 -ArchivePath $env:RUST_RELEASE_CANDIDATE
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Regression - build and launch exact v0.3.1 candidate in Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $versioned = Join-Path $env:RUNNER_TEMP 'MRI-Drive-Maker-v0.3.1-ci.zip'
+          cargo run --release --locked --manifest-path rust/mri-release/Cargo.toml -- --version 0.3.1 --output $versioned
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo run --release --locked --manifest-path rust/mri-release/Cargo.toml -- --verify $versioned
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & ./tests/PackageSmoke.ps1 -ArchivePath $versioned
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   publish-v031:
     name: Publish MRI Drive Maker v0.3.1 after verified main merge
@@ -94,7 +104,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - name: Build, verify and exercise versioned release archive
-        shell: pwsh
+        shell: powershell
         run: |
           $actualHead = (git rev-parse HEAD).Trim()
           if ($LASTEXITCODE -ne 0 -or $actualHead -ne $env:GITHUB_SHA) { throw 'Checkout does not match the merged release commit.' }
@@ -108,9 +118,8 @@ jobs:
           $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
           $checksum = Join-Path $env:RUNNER_TEMP 'MRI-Drive-Maker-v0.3.1.zip.sha256'
           [IO.File]::WriteAllText($checksum, "$hash  MRI-Drive-Maker-v0.3.1.zip`n", [Text.UTF8Encoding]::new($false))
-          "RELEASE_ARCHIVE=$archive" >> $env:GITHUB_ENV
-          "RELEASE_CHECKSUM=$checksum" >> $env:GITHUB_ENV
-          "RELEASE_HASH=$hash" >> $env:GITHUB_ENV
+          $environmentLines = "RELEASE_ARCHIVE=$archive`nRELEASE_CHECKSUM=$checksum`nRELEASE_HASH=$hash`n"
+          [IO.File]::AppendAllText($env:GITHUB_ENV, $environmentLines, [Text.UTF8Encoding]::new($false))
           Write-Host "Verified v0.3.1 candidate SHA256: $hash"
       - name: Publish GitHub Release and verify downloaded asset
         shell: pwsh
