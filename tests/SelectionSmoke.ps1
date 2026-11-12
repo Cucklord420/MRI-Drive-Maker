@@ -114,6 +114,14 @@ try {
     Throws { Build-SelectedMedia }
     Check ($script:Captured.Count -eq 0)
     Pass 'A USB replaced during confirmation cannot reach the batch runner'
+    $script:Captured=@(); $script:SwapOnConfirm=$false
+    $script:LiveInventory=$serialless
+    $script:Answers.Enqueue('1,2'); $script:Answers.Enqueue('ERASE 1,2')
+    Build-SelectedMedia
+    Check ($script:Captured.Count -eq 2)
+    Check (@($script:Captured | Where-Object { $_.SessionNoSerial -and $_.AllowErase }).Count -eq 2)
+    Check ($script:Captured[0].ExpectedNumber -eq 1 -and $script:Captured[1].ExpectedNumber -eq 2)
+    Pass 'Manual approval binds two serial-less drives to expected disk numbers'
     # A selected USB that disappears before its slot must end the finite
     # batch, record failure, and make the actual runner report failure.
     $definition=$ast.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Watch-Media'},$false)
@@ -129,14 +137,6 @@ try {
     $summary=Read-MRIJson $summaries[0].FullName
     Check (@($summary.Failed).Count -eq 1 -and @($summary.Verified).Count -eq 0)
     Pass 'A missing selected USB ends the finite batch with a failed result'
-    $script:Captured=@(); $script:SwapOnConfirm=$false
-    $script:LiveInventory=$serialless
-    $script:Answers.Enqueue('1,2'); $script:Answers.Enqueue('ERASE 1,2')
-    Build-SelectedMedia
-    Check ($script:Captured.Count -eq 2)
-    Check (@($script:Captured | Where-Object { $_.SessionNoSerial -and $_.AllowErase }).Count -eq 2)
-    Check ($script:Captured[0].ExpectedNumber -eq 1 -and $script:Captured[1].ExpectedNumber -eq 2)
-    Pass 'Manual approval binds two serial-less drives to expected disk numbers'
     Write-Host "$checks/$checks selection checks passed."
 } finally { Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue }
 exit 0
