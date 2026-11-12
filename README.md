@@ -1,6 +1,6 @@
 # MRI Drive Maker
 
-**For current source fixes:** On [the repository page](https://github.com/Cucklord420/MRI-Drive-Maker), choose **Code → Download ZIP** and extract it completely, then right-click **START-MRI-DRIVE-MAKER.cmd → Run as administrator**. The launcher also works from the repository root. The [published v0.3.0 download](https://github.com/Cucklord420/MRI-Drive-Maker/raw/refs/heads/main/downloads/MRI-Drive-Maker-v0.3.0.zip) is an older frozen build **without serial-less USB support**; it has not been republished.
+**Packaged download:** See [GitHub Releases](https://github.com/Cucklord420/MRI-Drive-Maker/releases). For Kanguru drives reporting serial `0`, choose **v0.3.1 or newer** and confirm that the versioned ZIP is attached before downloading. The [older v0.3.0 ZIP](https://github.com/Cucklord420/MRI-Drive-Maker/raw/refs/heads/main/downloads/MRI-Drive-Maker-v0.3.0.zip) remains unchanged and **does not have the serial-less USB fix**. If the updated release is not available, the [repository source](https://github.com/Cucklord420/MRI-Drive-Maker) can be downloaded from **Code → Download ZIP**. Extract the complete archive, then right-click **START-MRI-DRIVE-MAKER.cmd → Run as administrator**.
 
 Lists USBs, cleans the drives you select, formats them as FAT32, and copies your source folder's contents directly to each USB root. Several drives build at once. No BDE utility or setup batch is required.
 
