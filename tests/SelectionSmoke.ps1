@@ -41,6 +41,35 @@ try {
     $duplicate=Drive 9 'A'
     Throws { Select-MRIUsbDrives '6' ($inventory+@($duplicate)) $cfg }
     Pass 'Protected source/system disks and duplicate serials remain excluded'
+    # Two identical-model USBs without hardware serials must be separately
+    # selectable for a single confirmed manual batch, never for registration.
+    function NoSerialDrive {
+        param([int]$Number,[string]$Device)
+        $pnp=('USBSTOR\\KANGURU\\'+$Device)
+        $diskPath=('\\\\?\\USBSTOR#KANGURU#'+$Device)
+        [pscustomobject]@{Number=$Number;Serial='0';PnpId=$pnp;DiskPath=$diskPath;Model='KANGURU FLASHBLU';Size=[long]31000000000
+            Key=(Get-MRINoSerialDriveKey $pnp $diskPath 'KANGURU FLASHBLU' 31000000000)
+            IsBoot=$false;IsSystem=$false;IsReadOnly=$false;IsOffline=$false;BusType='USB';IdentityError=''}
+    }
+    $serialless=@((NoSerialDrive 1 'PORT1'),(NoSerialDrive 2 'PORT2'))
+    Check ($serialless[0].Key -ne $serialless[1].Key)
+    Throws { Select-MRIUsbDrives '1' $serialless $cfg }
+    Check (@(Select-MRIUsbDrives '1,2' $serialless $cfg @() -AllowNoSerial).Count -eq 2)
+    Pass 'Distinct serial-less USBs require explicit one-time selection'
+
+    $sameConnection=NoSerialDrive 3 'PORT1'
+    Throws { Select-MRIUsbDrives '1,3' ($serialless+@($sameConnection)) $cfg @() -AllowNoSerial }
+    $serialless[0].IsSystem=$true
+    Throws { Select-MRIUsbDrives '1' $serialless $cfg @() -AllowNoSerial }
+    $serialless[0].IsSystem=$false
+    Throws { Select-MRIUsbDrives '1' $serialless $cfg @($serialless[0].Key) -AllowNoSerial }
+    Throws { Get-MRINoSerialDriveKey '' 'PATH' 'MODEL' 31000000000 }
+    Throws { Get-MRINoSerialDriveKey 'PNP' '' 'MODEL' 31000000000 }
+    Throws { Get-MRINoSerialDriveKey 'PNP' 'PATH' 'MODEL' 0 }
+    Throws { Assert-MRIRegistry @([pscustomobject]@{Key=$serialless[0].Key;Serial='0';PnpId=$serialless[0].PnpId;Model=$serialless[0].Model
+        Size=$serialless[0].Size;Label='MRI_01';AllowErase=$true}) }
+    Pass 'Duplicate, protected, incomplete and registry serial-less identities remain blocked'
+
 
     # Load just the real selection/confirmation function without running a menu.
     $tokens=$null; $errors=$null
@@ -100,6 +129,14 @@ try {
     $summary=Read-MRIJson $summaries[0].FullName
     Check (@($summary.Failed).Count -eq 1 -and @($summary.Verified).Count -eq 0)
     Pass 'A missing selected USB ends the finite batch with a failed result'
+    $script:Captured=@(); $script:SwapOnConfirm=$false
+    $script:LiveInventory=$serialless
+    $script:Answers.Enqueue('1,2'); $script:Answers.Enqueue('ERASE 1,2')
+    Build-SelectedMedia
+    Check ($script:Captured.Count -eq 2)
+    Check (@($script:Captured | Where-Object { $_.SessionNoSerial -and $_.AllowErase }).Count -eq 2)
+    Check ($script:Captured[0].ExpectedNumber -eq 1 -and $script:Captured[1].ExpectedNumber -eq 2)
+    Pass 'Manual approval binds two serial-less drives to expected disk numbers'
     Write-Host "$checks/$checks selection checks passed."
 } finally { Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue }
 exit 0
