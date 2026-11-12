@@ -18,8 +18,12 @@ open. Shared USB bandwidth limits speed.
 The selected folder is copied exactly to the root, without a wrapper.
 Preparation creates active MBR/FAT32 using up to 32,000,000,000 bytes.
 Every target file receives SHA-256 verification after writes are flushed.
-System, source and application disks are excluded. A selected drive that
-is removed, replaced or renumbered fails rather than redirecting a build.
+System, source and application disks are excluded. Serial-less USBs
+can be selected once in menu 2 using an unambiguous Windows connection
+path. Never unplug, swap or move a serial-less drive during the batch;
+port identity does not prove permanent hardware identity. Changed disk
+numbers or connection paths fail, and automatic registration still
+requires a usable hardware serial.
 
 A Advanced retains the registered-drive automatic watcher. That mode
 still blocks unexpected files and does not inherit a batch's erase approval.

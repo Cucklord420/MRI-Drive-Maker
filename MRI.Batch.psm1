@@ -265,36 +265,74 @@ function Get-MRIDriveKey {
     if ([string]::IsNullOrWhiteSpace($PnpId) -or [string]::IsNullOrWhiteSpace($Model)) { throw 'Incomplete USB hardware identity.' }
     return Get-MRIHash (($Serial.Trim().ToUpperInvariant(), $PnpId.Trim().ToUpperInvariant(), $Model.Trim().ToUpperInvariant(), [string]$Size) -join "`n")
 }
+function Get-MRINoSerialDriveKey {
+    param([string]$PnpId,[string]$DiskPath,[string]$Model,[long]$Size)
+    if ([string]::IsNullOrWhiteSpace($PnpId) -or [string]::IsNullOrWhiteSpace($DiskPath) -or
+        [string]::IsNullOrWhiteSpace($Model) -or $Size -le 0) {
+        throw 'Incomplete serial-less USB connection identity.'
+    }
+    # Connection identity is only approved for one explicit selected batch,
+    # never for the persistent registered-drive watcher.
+    return 'NS-'+(Get-MRIHash (($PnpId.Trim().ToUpperInvariant(),$DiskPath.Trim().ToUpperInvariant(),
+        $Model.Trim().ToUpperInvariant(),[string]$Size) -join "`n"))
+}
 function Get-MRIInventory {
     $hardware = @(Get-CimInstance -ClassName Win32_DiskDrive -ErrorAction Stop)
     foreach ($disk in @(Get-Disk -ErrorAction Stop | Where-Object { [string]$_.BusType -eq 'USB' })) {
         $rows = @($hardware | Where-Object { $_.Index -eq $disk.Number })
         if ($rows.Count -ne 1) { continue }
         $serial = ([string]$disk.SerialNumber).Trim().ToUpperInvariant()
-        if ([string]::IsNullOrWhiteSpace($serial)) { $serial = ([string]$rows[0].SerialNumber).Trim().ToUpperInvariant() }
+        if ([string]::IsNullOrWhiteSpace($serial) -or $serial -match '^0+$' -or $serial -in @('UNKNOWN','N/A','NONE')) {
+            $otherSerial=([string]$rows[0].SerialNumber).Trim().ToUpperInvariant()
+            if (-not [string]::IsNullOrWhiteSpace($otherSerial) -and $otherSerial -notmatch '^0+$' -and
+                $otherSerial -notin @('UNKNOWN','N/A','NONE')) { $serial=$otherSerial }
+        }
         $pnp = ([string]$rows[0].PNPDeviceID).Trim().ToUpperInvariant()
         $model = ([string]$disk.FriendlyName).Trim().ToUpperInvariant()
-        $key = ''; $identityError = ''
-        try { $key = Get-MRIDriveKey $serial $pnp $model ([long]$disk.Size) } catch { $identityError = $_.Exception.Message }
+        $diskPath=([string]$disk.Path).Trim().ToUpperInvariant()
+        $key = ''; $identityError = ''; $noSerial=$false
+        try { $key = Get-MRIDriveKey $serial $pnp $model ([long]$disk.Size) }
+        catch {
+            $identityError = $_.Exception.Message
+            if ($identityError -eq 'This drive does not report a usable hardware serial number.') {
+                try {
+                    $key=Get-MRINoSerialDriveKey $pnp $diskPath $model ([long]$disk.Size)
+                    $noSerial=$true; $identityError=''
+                } catch { $identityError=$_.Exception.Message }
+            }
+        }
         [pscustomobject]@{
-            Key=$key; Number=[int]$disk.Number; Serial=$serial; PnpId=$pnp; Model=$model; Size=[long]$disk.Size
+            Key=$key; Number=[int]$disk.Number; Serial=$serial; PnpId=$pnp; DiskPath=$diskPath; SessionNoSerial=$noSerial
+            Model=$model; Size=[long]$disk.Size
             IsBoot=[bool]$disk.IsBoot; IsSystem=[bool]$disk.IsSystem; IsReadOnly=[bool]$disk.IsReadOnly
             IsOffline=[bool]$disk.IsOffline; BusType=[string]$disk.BusType; IdentityError=$identityError
         }
     }
 }
 function Get-MRIDriveBlockReason {
-    param($Drive, [array]$Inventory, $Config, [string[]]$ProtectedKeys=@())
+    param($Drive, [array]$Inventory, $Config, [string[]]$ProtectedKeys=@(),[switch]$AllowNoSerial)
     if ([string]::IsNullOrWhiteSpace($Drive.Key)) { return "Hardware identity unavailable: $($Drive.IdentityError)" }
     if ($Drive.BusType -ne 'USB' -or $Drive.IsBoot -or $Drive.IsSystem) { return 'Boot, system, and non-USB disks are excluded.' }
     if ($Drive.IsOffline -or $Drive.IsReadOnly) { return 'Drive is offline or write protected.' }
     if ($Drive.Key -in $ProtectedKeys) { return 'This disk contains the source files or the automation itself.' }
     if ($Drive.Size -lt $Config.MinimumDiskBytes -or $Drive.Size -gt $Config.MaximumDiskBytes) { return 'Capacity is outside the configured MRI range.' }
-    if (@($Inventory | Where-Object { $_.Serial -eq $Drive.Serial }).Count -ne 1) { return 'Duplicate USB serial number; cannot identify this drive safely.' }
+    $noSerial=($null -ne $Drive.PSObject.Properties['SessionNoSerial'] -and [bool]$Drive.SessionNoSerial)
+    if ($noSerial) {
+        if (-not $AllowNoSerial) { return 'Serial-less USB requires a one-time selected batch; registration is unavailable.' }
+        if ($Drive.Key -cne (Get-MRINoSerialDriveKey $Drive.PnpId $Drive.DiskPath $Drive.Model $Drive.Size)) {
+            return 'Serial-less USB connection identity changed.'
+        }
+        if (@($Inventory | Where-Object { $_.Key -eq $Drive.Key -or
+                ($null -ne $_.PSObject.Properties['DiskPath'] -and $_.DiskPath -eq $Drive.DiskPath) }).Count -ne 1) {
+            return 'Duplicate USB connection identity; cannot safely select this disk.'
+        }
+    } elseif (@($Inventory | Where-Object { $_.Serial -eq $Drive.Serial }).Count -ne 1) {
+        return 'Duplicate USB serial number; cannot identify this drive safely.'
+    }
     return $null
 }
 function Select-MRIUsbDrives {
-    param([string]$Selection,[array]$Inventory,$Config,[string[]]$ProtectedKeys=@())
+    param([string]$Selection,[array]$Inventory,$Config,[string[]]$ProtectedKeys=@(),[switch]$AllowNoSerial)
     if ([string]::IsNullOrWhiteSpace($Selection)) { return }
     if ($Selection -notmatch '^\s*\d+(\s*,\s*\d+)*\s*$') { throw 'Enter disk numbers separated by commas.' }
     $numbers=@()
@@ -308,7 +346,7 @@ function Select-MRIUsbDrives {
     foreach ($number in $numbers) {
         $matches=@($Inventory | Where-Object { $_.Number -eq $number })
         if ($matches.Count -ne 1) { throw "Disk $number was not in the displayed USB list." }
-        $reason=Get-MRIDriveBlockReason $matches[0] $Inventory $Config $ProtectedKeys
+        $reason=Get-MRIDriveBlockReason $matches[0] $Inventory $Config $ProtectedKeys -AllowNoSerial:$AllowNoSerial
         if ($reason) { throw ('Disk {0}: {1}' -f $number,$reason) }
         $selected+=$matches[0]
     }
@@ -564,7 +602,12 @@ function Assert-MRIDrive {
     $matches=@($inventory | Where-Object { $_.Key -eq $Record.Key })
     if ($matches.Count -ne 1) { throw 'Registered USB removed, replaced, or ambiguously identified.' }
     $drive=$matches[0]
-    $reason=Get-MRIDriveBlockReason $drive $inventory $Config $ProtectedKeys
+    $allowNoSerial=($null -ne $ExpectedNumber -and
+        $null -ne $Record.PSObject.Properties['SessionNoSerial'] -and [bool]$Record.SessionNoSerial)
+    $reason=Get-MRIDriveBlockReason $drive $inventory $Config $ProtectedKeys -AllowNoSerial:$allowNoSerial
+    if ($allowNoSerial -and (-not $drive.SessionNoSerial -or $drive.DiskPath -ne $Record.DiskPath)) {
+        throw 'Selected serial-less USB connection changed; no disk operation was started.'
+    }
     if ($reason) { throw $reason }
     if ($null -ne $ExpectedNumber -and $drive.Number -ne $ExpectedNumber) { throw 'Disk number changed during this build.' }
     return $drive
@@ -786,9 +829,18 @@ function Get-MRIWritableDisk {
     $disk=Get-Disk -Number $drive.Number -ErrorAction Stop
     $hardware=@(Get-CimInstance -ClassName Win32_DiskDrive -Filter ("Index = "+$disk.Number) -ErrorAction Stop)
     if ($hardware.Count -ne 1 -or $hardware[0].Index -ne $disk.Number) { throw 'The selected storage object has no unambiguous physical identity.' }
-    $serial=([string]$disk.SerialNumber).Trim()
-    if (-not $serial) { $serial=[string]$hardware[0].SerialNumber }
-    $key=Get-MRIDriveKey $serial ([string]$hardware[0].PNPDeviceID) ([string]$disk.FriendlyName) ([long]$disk.Size)
+    $serial=([string]$disk.SerialNumber).Trim().ToUpperInvariant()
+    if ([string]::IsNullOrWhiteSpace($serial) -or $serial -match '^0+$' -or $serial -in @('UNKNOWN','N/A','NONE')) {
+        $alternate=([string]$hardware[0].SerialNumber).Trim().ToUpperInvariant()
+        if (-not [string]::IsNullOrWhiteSpace($alternate) -and $alternate -notmatch '^0+$' -and
+            $alternate -notin @('UNKNOWN','N/A','NONE')) { $serial=$alternate }
+    }
+    $noSerial=$null -ne $Record.PSObject.Properties['SessionNoSerial'] -and [bool]$Record.SessionNoSerial
+    if ($noSerial) {
+        $key=Get-MRINoSerialDriveKey ([string]$hardware[0].PNPDeviceID) ([string]$disk.Path) ([string]$disk.FriendlyName) ([long]$disk.Size)
+    } else {
+        $key=Get-MRIDriveKey $serial ([string]$hardware[0].PNPDeviceID) ([string]$disk.FriendlyName) ([long]$disk.Size)
+    }
     if ($key -ne $Record.Key -or $disk.Number -ne $ExpectedNumber -or [string]$disk.BusType -ne 'USB' -or
         $disk.IsBoot -or $disk.IsSystem -or $disk.IsOffline -or $disk.IsReadOnly) { throw 'The storage object changed or is protected. No disk operation was started.' }
     Assert-MRIPathProtection $Record $ProtectedPaths
@@ -1006,9 +1058,12 @@ function Update-MRIArrivals {
         if (-not $Tracker.ContainsKey($d.Key)) { $Tracker[$d.Key]=[pscustomobject]@{ Number=$d.Number; Stable=0; Attempted=$false } }
         $t=$Tracker[$d.Key]
         if ($t.Number -ne $d.Number) { $t.Number=$d.Number; $t.Stable=0 }
-        if (Get-MRIDriveBlockReason $d $Inventory $Config $ProtectedKeys) { $t.Stable=0; continue }
-        $t.Stable++
         $matches=@($Records | Where-Object { $_.Key -eq $d.Key })
+        $allowNoSerial=($matches.Count -eq 1 -and
+            $null -ne $matches[0].PSObject.Properties['SessionNoSerial'] -and [bool]$matches[0].SessionNoSerial -and
+            $null -ne $matches[0].PSObject.Properties['ExpectedNumber'] -and $matches[0].ExpectedNumber -eq $d.Number)
+        if (Get-MRIDriveBlockReason $d $Inventory $Config $ProtectedKeys -AllowNoSerial:$allowNoSerial) { $t.Stable=0; continue }
+        $t.Stable++
         if ($matches.Count -eq 1 -and $t.Stable -ge $Config.StablePolls -and -not $t.Attempted) { $matches[0] }
     }
     foreach ($key in @($Tracker.Keys)) { if (-not $present.ContainsKey($key)) { $Tracker.Remove($key) } }

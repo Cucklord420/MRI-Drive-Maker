@@ -92,7 +92,9 @@ function Show-Drives {
         $d=$_
         [pscustomobject]@{ Disk=$d.Number; Model=$d.Model; GB=[Math]::Round($d.Size/1e9,1)
             Serial=$d.Serial
-            Status=$(if ($d.IdentityError) { $d.IdentityError } elseif ($d.IsBoot -or $d.IsSystem) { 'PROTECTED' } else { 'USB' }) }
+            Status=$(if ($d.IdentityError) { $d.IdentityError } elseif ($d.IsBoot -or $d.IsSystem) { 'PROTECTED' }
+                elseif ($null -ne $d.PSObject.Properties['SessionNoSerial'] -and $d.SessionNoSerial) { 'USB (manual batch only)' }
+                else { 'USB' }) }
     } | Format-Table -AutoSize | Out-Host
 }
 function Build-SelectedMedia {
@@ -101,7 +103,7 @@ function Build-SelectedMedia {
     $inventory=@(Get-MRIInventory)
     $protected=@(Get-MRIProtectedKeys @($cfg.SourcePath,$PSScriptRoot,$DataPath) $inventory)
     Show-Drives -Inventory $inventory
-    $selected=@(Select-MRIUsbDrives (Read-Host 'Disk numbers to clean and build, separated by commas (blank cancels)') $inventory $cfg $protected)
+    $selected=@(Select-MRIUsbDrives (Read-Host 'Disk numbers to clean and build, separated by commas (blank cancels)') $inventory $cfg $protected -AllowNoSerial)
     if (-not $selected.Count) { return }
     $selected | Select-Object Number,Model,Serial,@{Name='GB';Expression={[Math]::Round($_.Size/1e9,1)}} | Format-Table -AutoSize | Out-Host
     $phrase='ERASE '+(($selected.Number | Sort-Object) -join ',')
@@ -112,8 +114,10 @@ function Build-SelectedMedia {
         # Bind the approval to both physical identity and the displayed number.
         [void](Assert-MRIDrive $drive $cfg $protected $drive.Number)
         $index++
-        $records+=[pscustomobject]@{Key=$drive.Key;Serial=$drive.Serial;PnpId=$drive.PnpId;Model=$drive.Model
-            Size=$drive.Size;Label=('MRI_{0:D2}' -f $index);AllowErase=$true;ExpectedNumber=[int]$drive.Number}
+        $noSerial=($null -ne $drive.PSObject.Properties['SessionNoSerial'] -and [bool]$drive.SessionNoSerial)
+        $diskPath=$(if ($null -ne $drive.PSObject.Properties['DiskPath']) { [string]$drive.DiskPath } else { '' })
+        $records+=[pscustomobject]@{Key=$drive.Key;Serial=$drive.Serial;PnpId=$drive.PnpId;DiskPath=$diskPath;SessionNoSerial=$noSerial
+            Model=$drive.Model;Size=$drive.Size;Label=('MRI_{0:D2}' -f $index);AllowErase=$true;ExpectedNumber=[int]$drive.Number}
     }
     Watch-Media -SessionRecords $records
 }
@@ -218,13 +222,17 @@ function Watch-Media {
                 foreach ($record in $records) {
                     if ($jobs.ContainsKey($record.Key) -or $ready.ContainsKey($record.Key) -or $failed.ContainsKey($record.Key)) { continue }
                     $live=@($inventory | Where-Object { $_.Key -eq $record.Key -and $_.Number -eq $record.ExpectedNumber })
-                    $reason=$(if ($live.Count -ne 1) { 'Selected USB removed, replaced, or renumbered before its build.' } else { Get-MRIDriveBlockReason $live[0] $inventory $cfg $protected })
+                    $allowNoSerial=($null -ne $record.PSObject.Properties['SessionNoSerial'] -and [bool]$record.SessionNoSerial)
+                    $reason=$(if ($live.Count -ne 1) { 'Selected USB removed, replaced, or renumbered before its build.' } else {
+                        Get-MRIDriveBlockReason $live[0] $inventory $cfg $protected -AllowNoSerial:$allowNoSerial })
                     if ($reason) { Set-MRIOutcome $ready $failed $record.Key $record.Label $false; Write-Host "$($record.Label): FAILED - $reason" -ForegroundColor Red }
                 }
                 $arrivals=@($arrivals | Where-Object { -not $failed.ContainsKey($_.Key) })
             }
             foreach ($d in $inventory) {
-                $reason=Get-MRIDriveBlockReason $d $inventory $cfg $protected
+                $oneTimeSerialless=($once -and @($records | Where-Object { $_.Key -eq $d.Key -and
+                    $null -ne $_.PSObject.Properties['SessionNoSerial'] -and $_.SessionNoSerial }).Count -eq 1)
+                $reason=Get-MRIDriveBlockReason $d $inventory $cfg $protected -AllowNoSerial:$oneTimeSerialless
                 if (-not $reason -and -not @($records | Where-Object { $_.Key -eq $d.Key }).Count) { $reason='Unregistered USB ignored.' }
                 $notice=([string]$d.Number)+'|'+$d.Key+'|'+$reason
                 if ($reason -and -not $seen.ContainsKey($notice)) { Write-Host "Disk $($d.Number): $reason" -ForegroundColor Yellow; $seen[$notice]=$true }
