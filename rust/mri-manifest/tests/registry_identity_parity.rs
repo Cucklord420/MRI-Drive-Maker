@@ -80,8 +80,11 @@ fn registry_identity_matches_original_powershell_on_240_cases() {
     assert_eq!(cases.len(), 240, "the full fixture set must run");
     let temp = tempfile::tempdir().expect("create owned temporary fixture directory");
     let batch = temp.path().join("cases.json");
-    fs::write(&batch, serde_json::to_vec(&cases).expect("serialize fixtures"))
-        .expect("write synthetic fixture file");
+    fs::write(
+        &batch,
+        serde_json::to_vec(&cases).expect("serialize fixtures"),
+    )
+    .expect("write synthetic fixture file");
 
     let module = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../MRI.Batch.psm1");
     assert!(module.is_file(), "original PowerShell module must exist");
@@ -107,14 +110,12 @@ fn registry_identity_matches_original_powershell_on_240_cases() {
 
     for (index, case) in cases.iter().enumerate() {
         let input = temp.path().join("input.json");
-        fs::write(&input, serde_json::to_vec(case).expect("serialize case"))
-            .expect("write case");
+        fs::write(&input, serde_json::to_vec(case).expect("serialize case")).expect("write case");
         let output = Command::new(env!("CARGO_BIN_EXE_registry_identity"))
             .arg(&input)
             .output()
             .expect("run Rust read-only registry validator");
-        let rust: Value =
-            serde_json::from_slice(&output.stdout).expect("validator returns JSON");
+        let rust: Value = serde_json::from_slice(&output.stdout).expect("validator returns JSON");
         let oracle = expected[index];
         if oracle == "OK" {
             assert!(
