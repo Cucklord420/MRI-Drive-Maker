@@ -1,6 +1,12 @@
 OPEN: START-MRI-DRIVE-MAKER.cmd
 Right-click it and choose Run as administrator.
 
+If Windows blocks the downloaded script before the menu opens:
+Only for a verified, trusted GitHub download, right-click the original ZIP,
+choose Properties > General > Unblock (if shown), Apply, then extract
+again and open the launcher. Never unblock an untrusted download.
+If workplace policy still blocks it, contact IT; do not bypass policy.
+
 1. Menu 1: choose the extracted MRI folder. Its contents will go directly
    to each USB root. Actual ISO and ZIP files are supported too.
 2. Menu 2: check the USB list, then enter the intended disk numbers
