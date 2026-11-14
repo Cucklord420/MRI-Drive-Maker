@@ -36,7 +36,7 @@ fn policy(input: &Value) -> Result<Value, String> {
                 file["IsDirectory"] == false
                     && file["RelativePath"]
                         .as_str()
-                        .is_some_and(|path| path.eq_ignore_ascii_case(wanted))
+                        .is_some_and(|path| path.to_lowercase() == wanted.to_lowercase())
                     && file["Length"].as_u64().is_some_and(|length| length > 0)
             }) {
                 return Err(format!(
