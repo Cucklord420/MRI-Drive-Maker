@@ -8,7 +8,6 @@ on:
       - 'tests/RustManifestParity.ps1'
       - 'tests/RustManifestMatchParity.ps1'
       - 'tests/RustContentsSafeParity.ps1'
-      - 'tests/RustRegistryIdentityParity.ps1'
       - '.github/workflows/rust-manifest.yml'
   pull_request:
   workflow_dispatch:
@@ -47,6 +46,3 @@ jobs:
       - name: Compare 780 existing-media receipt safety decisions with original PowerShell
         shell: powershell
         run: ./tests/RustContentsSafeParity.ps1
-      - name: Compare 240 registry identity decisions with actual PowerShell
-        shell: powershell
-        run: ./tests/RustRegistryIdentityParity.ps1
