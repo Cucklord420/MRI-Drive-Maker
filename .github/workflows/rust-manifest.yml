@@ -1,6 +1,10 @@
 name: Rust MRI manifest versus original PowerShell parity
 on:
   push:
+    # Feature branches use pull_request checks; only main receives push validation.
+    # Keeps every PR check and the independent post-merge/release gate.
+    branches:
+      - main
     paths:
       - 'rust-toolchain.toml'
       - 'rust/mri-manifest/**'
