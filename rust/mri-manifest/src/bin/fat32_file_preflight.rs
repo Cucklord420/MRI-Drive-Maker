@@ -164,6 +164,61 @@ mod tests {
         assert!(policy(&nullable).is_ok());
     }
 
+    #[test]
+    fn unicode_case_insensitive_required_files_match_original_policy() {
+        let input = json!({
+            "Entries": [{"RelativePath":"Ä.TXT","IsDirectory":false,"Length":12}],
+            "RequiredFiles": ["ä.txt"],
+            "SetupBatch": ""
+        });
+        assert!(
+            policy(&input).is_ok(),
+            "RequiredFiles should use the original PowerShell Unicode case-insensitive comparison"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn unicode_required_file_cases_match_windows_powershell_comparisons() {
+        for (source, required) in [
+            ("Ä.TXT", "ä.txt"),
+            ("ÉFI/BOOT/BOOTX64.EFI", "éfi/boot/bootx64.efi"),
+            ("BOOTMGR", "bootmgr"),
+            ("bootmgr", "BOOTX64.EFI"),
+        ] {
+            let output = std::process::Command::new("powershell.exe")
+                .args([
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "if ($env:MRI_TEST_SOURCE -eq $env:MRI_TEST_REQUIRED) { 'MATCH' } else { 'NO_MATCH' }",
+                ])
+                .env("MRI_TEST_SOURCE", source)
+                .env("MRI_TEST_REQUIRED", required)
+                .output()
+                .expect("Windows PowerShell 5.1 must be available for matched-input parity");
+            assert!(
+                output.status.success(),
+                "PowerShell comparison failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let original_match = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .eq("MATCH");
+            let input = json!({
+                "Entries": [{"RelativePath":source,"IsDirectory":false,"Length":12}],
+                "RequiredFiles": [required],
+                "SetupBatch": ""
+            });
+            assert_eq!(
+                policy(&input).is_ok(),
+                original_match,
+                "PowerShell/Rust parity differed for {source:?} versus {required:?}"
+            );
+        }
+    }
+
     #[cfg(windows)]
     #[test]
     fn paired_original_powershell_preflight_regressions_match_rust_policy() {
