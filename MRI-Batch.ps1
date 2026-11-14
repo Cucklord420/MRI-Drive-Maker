@@ -63,11 +63,12 @@ function Configure-Media {
         $source=$(if ($choice -ne '2') { $dialog.SelectedPath } else { $dialog.FileName })
     } finally { $dialog.Dispose() }
     $cfg=Read-MRIJson (Join-Path $PSScriptRoot 'mri-config.example.json')
+    # Changing the source must not silently reset the saved build concurrency.
+    if ([IO.File]::Exists($ConfigPath)) { $cfg.MaxParallel=(Read-MRIJson $ConfigPath).MaxParallel }
     $cfg.SourcePath=$source
     $cfg.SourceKind=$(if ($choice -ne '2') { 'Folder' } else { [IO.Path]::GetExtension($source).TrimStart('.').ToUpperInvariant() })
     $cfg.PrepareDisk=$true
     Write-Host 'The selected contents will be copied directly to each USB root after FAT32 preparation.'
-    $cfg.MaxParallel=Read-ParallelLimit $cfg.MaxParallel
     $opened=$null
     try {
         Write-Host 'Checking the source contents and FAT32 limits.'
@@ -81,7 +82,8 @@ function Configure-Media {
         Assert-MRIConfig $cfg
         Write-MRIJson $ConfigPath $cfg
     } finally { Close-MRISource $opened }
-    Write-Host 'Source saved. Choose 2 to select USBs and build.'
+    Write-Host "Source saved. Up to $($cfg.MaxParallel) simultaneous builds; use menu 4 to change the limit."
+    Write-Host 'Choose 2 to review the USB disks and confirm the batch.'
 }
 function Show-Drives {
     param([array]$Inventory)
@@ -103,6 +105,7 @@ function Build-SelectedMedia {
     $inventory=@(Get-MRIInventory)
     $protected=@(Get-MRIProtectedKeys @($cfg.SourcePath,$PSScriptRoot,$DataPath) $inventory)
     Show-Drives -Inventory $inventory
+    if (-not $inventory.Count) { return }
     $selected=@(Select-MRIUsbDrives (Read-Host 'Disk numbers to clean and build, separated by commas (blank cancels)') $inventory $cfg $protected -AllowNoSerial)
     if (-not $selected.Count) { return }
     $selected | Select-Object Number,Model,Serial,@{Name='GB';Expression={[Math]::Round($_.Size/1e9,1)}} | Format-Table -AutoSize | Out-Host
@@ -344,7 +347,7 @@ try {
             Write-Host 'GPL v3: you may copy, modify, and redistribute under LICENSE. No warranty.'
             Write-Host ("License: " + (Join-Path $PSScriptRoot 'LICENSE'))
             Write-Host '1 Choose MRI folder / ISO / ZIP'
-            Write-Host '2 Clean, format FAT32 and copy to selected USBs'
+            Write-Host '2 Prepare selected USBs (requires exact ERASE confirmation)'
             Write-Host '3 List connected USB drives'
             Write-Host '4 Set simultaneous builds (1-30)'
             Write-Host 'A Advanced: registered-drive watcher'
