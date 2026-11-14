@@ -1,6 +1,6 @@
 # MRI Drive Maker
 
-**Packaged download:** See [GitHub Releases](https://github.com/Cucklord420/MRI-Drive-Maker/releases). For Kanguru drives reporting serial `0`, choose **v0.3.1 or newer** and confirm that the versioned ZIP is attached before downloading. The [older v0.3.0 ZIP](https://github.com/Cucklord420/MRI-Drive-Maker/raw/refs/heads/main/downloads/MRI-Drive-Maker-v0.3.0.zip) remains unchanged and **does not have the serial-less USB fix**. If the updated release is not available, the [repository source](https://github.com/Cucklord420/MRI-Drive-Maker) can be downloaded from **Code → Download ZIP**. Extract the complete archive, then right-click **START-MRI-DRIVE-MAKER.cmd → Run as administrator**.
+**Packaged download:** See [GitHub Releases](https://github.com/Cucklord420/MRI-Drive-Maker/releases). For Kanguru drives reporting serial `0`, choose **v0.3.1 or newer**; for the streamlined menu and preserved build-concurrency setting, choose **v0.3.2 or newer**. Confirm that the versioned ZIP is attached before downloading. The [older v0.3.0 ZIP](https://github.com/Cucklord420/MRI-Drive-Maker/raw/refs/heads/main/downloads/MRI-Drive-Maker-v0.3.0.zip) remains unchanged and **does not have the serial-less USB fix**. If the updated release is not available, the [repository source](https://github.com/Cucklord420/MRI-Drive-Maker) can be downloaded from **Code → Download ZIP**. Extract the complete archive, then right-click **START-MRI-DRIVE-MAKER.cmd → Run as administrator**.
 
 Lists USBs, cleans the drives you select, formats them as FAT32, and copies your source folder's contents directly to each USB root. Several drives build at once. No BDE utility or setup batch is required.
 
@@ -13,7 +13,7 @@ Lists USBs, cleans the drives you select, formats them as FAT32, and copies your
 
 New configurations allow **4 simultaneous builds**. Menu **1** chooses or changes the source without re-prompting for concurrency; the saved limit is retained. Choose menu **4** whenever you want to set **1–30**. Remaining selected drives wait for a slot. Shared hubs and USB controllers share bandwidth, so 30 slots is not a measured 30-drive speedup. Press **Q** during a session to cancel unfinished builds.
 
-The published v0.3.1 ZIP contains the launcher, quick guide, license/notices, and editable source/tests inside **App/**. The repository source ZIP keeps those files at the repository root. Configuration and **Data/** are created beside the launcher. Historical launchers and test reports stay in this repository, outside the download.
+Versioned release ZIPs contain the launcher, quick guide, license/notices, and editable source/tests inside **App/**. Release v0.3.2 adds the streamlined script menu and keeps the serial-less Kanguru manual-selection fix introduced in v0.3.1. The repository source ZIP keeps those files at the repository root. Configuration and **Data/** are created beside the launcher. Historical launchers and test reports stay in this repository, outside the download.
 
 ## What happens to a drive
 
