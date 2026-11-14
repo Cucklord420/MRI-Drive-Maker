@@ -203,9 +203,7 @@ mod tests {
                 "PowerShell comparison failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
-            let original_match = String::from_utf8_lossy(&output.stdout)
-                .trim()
-                .eq("MATCH");
+            let original_match = String::from_utf8_lossy(&output.stdout).trim().eq("MATCH");
             let input = json!({
                 "Entries": [{"RelativePath":source,"IsDirectory":false,"Length":12}],
                 "RequiredFiles": [required],
