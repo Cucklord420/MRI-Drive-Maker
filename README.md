@@ -7,13 +7,13 @@ Lists USBs, cleans the drives you select, formats them as FAT32, and copies your
 ## Use it
 
 1. Choose **1** and select the extracted MRI folder. Select the folder whose contents should appear at the USB root. An actual ISO or ZIP file is also supported.
-2. Choose **2**, check the displayed USB models, serials and disk numbers, then enter the intended numbers separated by commas.
+2. Choose **2**, check the displayed USB models, serials and disk numbers, then enter the intended numbers separated by commas. If none are connected, it returns to the menu without requesting disk numbers.
 3. Type the displayed confirmation, for example **ERASE 6,7,8**. **This deletes all files and partitions on those selected USBs.** Approval applies only to this batch; registration is unnecessary.
 4. Leave the drives connected until **READY**. The batch finishes after every selected drive succeeds or fails. Use Windows **Safely Remove Hardware** before unplugging.
 
-New configurations allow **4 simultaneous builds**. Choose **4** in the menu to set **1–30**; existing saved limits are preserved. Remaining selected drives wait for a slot. Shared hubs and USB controllers share bandwidth, so 30 slots is not a measured 30-drive speedup. Press **Q** during a session to cancel unfinished builds.
+New configurations allow **4 simultaneous builds**. Menu **1** chooses or changes the source without re-prompting for concurrency; the saved limit is retained. Choose menu **4** whenever you want to set **1–30**. Remaining selected drives wait for a slot. Shared hubs and USB controllers share bandwidth, so 30 slots is not a measured 30-drive speedup. Press **Q** during a session to cancel unfinished builds.
 
-The published v0.3.0 download contains the launcher, quick guide, license/notices, and editable source/tests inside **App/**. The repository source ZIP keeps those files at the repository root. Configuration and **Data/** are created beside the launcher. Historical launchers and test reports stay in this repository, outside the download.
+The published v0.3.1 ZIP contains the launcher, quick guide, license/notices, and editable source/tests inside **App/**. The repository source ZIP keeps those files at the repository root. Configuration and **Data/** are created beside the launcher. Historical launchers and test reports stay in this repository, outside the download.
 
 ## What happens to a drive
 
@@ -39,7 +39,7 @@ cargo run --locked --manifest-path rust/mri-release/Cargo.toml -- --output candi
 cargo run --locked --manifest-path rust/mri-release/Cargo.toml -- --verify candidate.zip
 ```
 
-The Rust program is the only supported release builder and verifier. The former Python entry point was retired after the Rust archive passed byte-for-byte parity checks during the migration; it is no longer present in the working tree or used by CI. CI tests the Rust CLI in debug and optimized release builds, then opens the generated download on Windows using the shipped launcher and startup tests. The existing published v0.3.0 download is not automatically replaced by this migration. No proprietary MRI source files or physical USB media are used in packaging tests.
+The Rust program is the only supported release builder and verifier. The former Python entry point was retired after the Rust archive passed byte-for-byte parity checks during the migration; it is no longer present in the working tree or used by CI. CI tests the Rust CLI in debug and optimized release builds, then opens the generated download on Windows using the shipped launcher and startup tests. The older v0.3.0 ZIP remains unchanged; download v0.3.1 or newer for the serial-less USB fix. No proprietary MRI source files or physical USB media are used in packaging tests.
 
 The Rust verifier limits compressed ZIP input to **128 MiB**, member count to **4,096**, any expanded member to **16 MiB**, aggregate expanded data to **64 MiB**, and `RELEASE.json` to **1 MiB**. It checks declared sizes before expansion, then streams each member while checking actual byte counts, CRC, and SHA-256. Only the bounded manifest and per-member hashes and sizes are retained.
 

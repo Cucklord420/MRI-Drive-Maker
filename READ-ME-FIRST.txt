@@ -12,7 +12,9 @@ Right-click it and choose Run as administrator.
    Q cancels unfinished builds.
 
 New settings allow 4 builds at once. Menu 4 changes the limit to 1-30.
-Existing saved limits are preserved. Waiting selected drives start as slots
+Choosing a new source in menu 1 preserves that limit without asking again.
+If no USB disks are connected, menu 2 returns without asking for numbers.
+Waiting selected drives start as slots
 open. Shared USB bandwidth limits speed.
 
 The selected folder is copied exactly to the root, without a wrapper.

@@ -98,6 +98,11 @@ try {
         if ($script:SwapOnConfirm -and $Prompt -like 'Type*') { $script:LiveInventory=@((Drive 6 'REPLACEMENT'),$inventory[1],$inventory[2]) }
         return $answer
     }
+    $script:LiveInventory=@(); $script:Captured=@()
+    Build-SelectedMedia
+    Check ($script:Captured.Count -eq 0 -and $script:Answers.Count -eq 0)
+    Pass 'No connected USB disks returns without asking for a selection or erase confirmation'
+    $script:LiveInventory=$inventory
     $script:Answers.Enqueue('6,7'); $script:Answers.Enqueue('yes')
     Build-SelectedMedia
     Check ($script:Captured.Count -eq 0)
