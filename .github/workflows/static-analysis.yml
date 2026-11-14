@@ -2,6 +2,10 @@ name: PowerShell static analysis
 
 on:
   push:
+    # Feature branches use pull_request checks; only main receives push validation.
+    # Keeps every PR check and the independent post-merge/release gate.
+    branches:
+      - main
     paths:
       - '**/*.ps1'
       - '**/*.psm1'

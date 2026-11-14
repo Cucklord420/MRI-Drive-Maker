@@ -1,25 +1,27 @@
 # MRI Drive Maker
 
-[Download v0.3.0](https://github.com/Cucklord420/MRI-Drive-Maker/raw/refs/heads/main/downloads/MRI-Drive-Maker-v0.3.0.zip). Extract the whole ZIP, then right-click **START-MRI-DRIVE-MAKER.cmd → Run as administrator**. This is the only launcher you need.
+**Packaged download:** See [GitHub Releases](https://github.com/Cucklord420/MRI-Drive-Maker/releases). For Kanguru drives reporting serial `0`, choose **v0.3.1 or newer**; for the streamlined menu and preserved build-concurrency setting, choose **v0.3.2 or newer**. Confirm that the versioned ZIP is attached before downloading. The [older v0.3.0 ZIP](https://github.com/Cucklord420/MRI-Drive-Maker/raw/refs/heads/main/downloads/MRI-Drive-Maker-v0.3.0.zip) remains unchanged and **does not have the serial-less USB fix**. If the updated release is not available, the [repository source](https://github.com/Cucklord420/MRI-Drive-Maker) can be downloaded from **Code → Download ZIP**. Extract the complete archive, then right-click **START-MRI-DRIVE-MAKER.cmd → Run as administrator**.
+
+**Downloaded ZIP startup (Windows):** Windows may label files extracted from an Internet-downloaded ZIP as downloaded from the Internet. Because the launcher uses PowerShell `RemoteSigned`, unsigned extracted scripts may be blocked before the menu starts. If you have verified and trust the download from this repository's GitHub Releases, right-click the **downloaded ZIP** in File Explorer, choose **Properties → General → Unblock** (if available), apply the change, and **extract the ZIP again** before launching. Do not unblock files from an untrusted source. If an organization-managed policy still prevents execution, contact your IT administrator; do **not** disable script protections or switch to `Bypass`. [Microsoft: execution policies](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies?view=powershell-5.1) and [Unblock-File](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/unblock-file?view=powershell-5.1).
 
 Lists USBs, cleans the drives you select, formats them as FAT32, and copies your source folder's contents directly to each USB root. Several drives build at once. No BDE utility or setup batch is required.
 
 ## Use it
 
 1. Choose **1** and select the extracted MRI folder. Select the folder whose contents should appear at the USB root. An actual ISO or ZIP file is also supported.
-2. Choose **2**, check the displayed USB models, serials and disk numbers, then enter the intended numbers separated by commas.
+2. Choose **2**, check the displayed USB models, serials and disk numbers, then enter the intended numbers separated by commas. If none are connected, it returns to the menu without requesting disk numbers.
 3. Type the displayed confirmation, for example **ERASE 6,7,8**. **This deletes all files and partitions on those selected USBs.** Approval applies only to this batch; registration is unnecessary.
 4. Leave the drives connected until **READY**. The batch finishes after every selected drive succeeds or fails. Use Windows **Safely Remove Hardware** before unplugging.
 
-New configurations allow **4 simultaneous builds**. Choose **4** in the menu to set **1–30**; existing saved limits are preserved. Remaining selected drives wait for a slot. Shared hubs and USB controllers share bandwidth, so 30 slots is not a measured 30-drive speedup. Press **Q** during a session to cancel unfinished builds.
+New configurations allow **4 simultaneous builds**. Menu **1** chooses or changes the source without re-prompting for concurrency; the saved limit is retained. Choose menu **4** whenever you want to set **1–30**. Remaining selected drives wait for a slot. Shared hubs and USB controllers share bandwidth, so 30 slots is not a measured 30-drive speedup. Press **Q** during a session to cancel unfinished builds.
 
-The download contains the launcher, this quick guide, license/notices, and editable source/tests inside **App/**. Configuration and **Data/** are created beside the launcher. Historical launchers and test reports stay in this repository, outside the download.
+Versioned release ZIPs contain the launcher, quick guide, license/notices, and editable source/tests inside **App/**. Release v0.3.2 adds the streamlined script menu and keeps the serial-less Kanguru manual-selection fix introduced in v0.3.1. The repository source ZIP keeps those files at the repository root. Configuration and **Data/** are created beside the launcher. Historical launchers and test reports stay in this repository, outside the download.
 
 ## What happens to a drive
 
 The selected batch cleans existing partitions, creates one active MBR/FAT32 partition using up to **32,000,000,000 bytes**, and copies the source contents to its root. Additional drive capacity remains unused. Each copied file is checked with SHA-256 after writes are flushed; failed or interrupted builds never receive a new success receipt. No report or marker is added to the USB.
 
-Physical identity is checked again before storage operations. System/boot disks, source/application disks, non-USB disks, offline/write-protected disks, and missing or duplicate hardware serials are blocked. If a selected drive disappears or its disk number changes while waiting, its build fails rather than following another disk.
+Drive identity is checked again before storage operations. System/boot disks, source/application disks, non-USB disks, offline/write-protected disks, and ambiguous identities are blocked. For the manually selected **menu 2** batch only, a USB without a usable serial (for example, two identical Kanguru FLASHBLU drives reporting `0`) can use an unambiguous Windows connection path plus PNP ID, model and size. This is **not permanent hardware identity**: do not unplug, swap, or move these drives during a build, and verify the displayed disk numbers before typing `ERASE`. A missing connection path or changed disk number blocks the build. The registered automatic watcher continues to require usable unique hardware serials.
 
 Empty sources, files larger than FAT32 permits, insufficient capacity, unsafe paths, and source links/junctions are rejected. ISO files are mounted read-only; ZIP files use a temporary extraction cache. A selected folder's contents are copied exactly, without silently flattening a child directory.
 
@@ -39,7 +41,7 @@ cargo run --locked --manifest-path rust/mri-release/Cargo.toml -- --output candi
 cargo run --locked --manifest-path rust/mri-release/Cargo.toml -- --verify candidate.zip
 ```
 
-The Rust program is the only supported release builder and verifier. The former Python entry point was retired after the Rust archive passed byte-for-byte parity checks during the migration; it is no longer present in the working tree or used by CI. CI tests the Rust CLI in debug and optimized release builds, then opens the generated download on Windows using the shipped launcher and startup tests. The existing published v0.3.0 download is not automatically replaced by this migration. No proprietary MRI source files or physical USB media are used in packaging tests.
+The Rust program is the only supported release builder and verifier. The former Python entry point was retired after the Rust archive passed byte-for-byte parity checks during the migration; it is no longer present in the working tree or used by CI. CI tests the Rust CLI in debug and optimized release builds, then opens the generated download on Windows using the shipped launcher and startup tests. The older v0.3.0 ZIP remains unchanged; download v0.3.1 or newer for the serial-less USB fix. No proprietary MRI source files or physical USB media are used in packaging tests.
 
 The Rust verifier limits compressed ZIP input to **128 MiB**, member count to **4,096**, any expanded member to **16 MiB**, aggregate expanded data to **64 MiB**, and `RELEASE.json` to **1 MiB**. It checks declared sizes before expansion, then streams each member while checking actual byte counts, CRC, and SHA-256. Only the bounded manifest and per-member hashes and sizes are retained.
 

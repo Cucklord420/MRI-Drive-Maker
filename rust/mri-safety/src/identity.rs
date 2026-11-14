@@ -20,15 +20,22 @@ pub struct IdentityResponse {
     pub error: Option<String>,
 }
 
-pub fn key(serial: &str, pnp_id: &str, model: &str, size: i64) -> Result<String, String> {
+pub(crate) const INVALID_SERIAL_ERROR: &str =
+    "This drive does not report a usable hardware serial number.";
+
+pub(crate) fn serial_is_usable(serial: &str) -> bool {
     let serial = serial.trim();
-    if serial.is_empty()
-        || serial.chars().all(|c| c == '0')
-        || ["UNKNOWN", "N/A", "NONE"]
+    !serial.is_empty()
+        && !serial.chars().all(|c| c == '0')
+        && !["UNKNOWN", "N/A", "NONE"]
             .iter()
             .any(|blocked| serial.eq_ignore_ascii_case(blocked))
-    {
-        return Err("This drive does not report a usable hardware serial number.".into());
+}
+
+pub fn key(serial: &str, pnp_id: &str, model: &str, size: i64) -> Result<String, String> {
+    let serial = serial.trim();
+    if !serial_is_usable(serial) {
+        return Err(INVALID_SERIAL_ERROR.into());
     }
     if pnp_id.trim().is_empty() || model.trim().is_empty() {
         return Err("Incomplete USB hardware identity.".into());
