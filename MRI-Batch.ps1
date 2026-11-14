@@ -64,7 +64,7 @@ function Configure-Media {
     } finally { $dialog.Dispose() }
     $cfg=Read-MRIJson (Join-Path $PSScriptRoot 'mri-config.example.json')
     # Changing the source must not silently reset the saved build concurrency.
-    if ([IO.File]::Exists($ConfigPath)) { $cfg.MaxParallel=(Get-Config).MaxParallel }
+    if ([IO.File]::Exists($ConfigPath)) { $cfg.MaxParallel=(Read-MRIJson $ConfigPath).MaxParallel }
     $cfg.SourcePath=$source
     $cfg.SourceKind=$(if ($choice -ne '2') { 'Folder' } else { [IO.Path]::GetExtension($source).TrimStart('.').ToUpperInvariant() })
     $cfg.PrepareDisk=$true
