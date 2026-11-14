@@ -41,7 +41,7 @@ try {
             $process.StandardInput.Close()
             if (-not $process.WaitForExit(30000)) { & (Join-Path $env:SystemRoot 'System32/taskkill.exe') /PID $process.Id /T /F | Out-Null; throw 'Packaged launcher timed out.' }
             $output=$stdout.GetAwaiter().GetResult()+$stderr.GetAwaiter().GetResult()
-            if ($process.ExitCode -ne 0 -or -not $output.Contains('Choose MRI folder') -or -not $output.Contains('Set simultaneous builds') -or -not $output.Contains('Clean, format FAT32 and copy to selected USBs')) { throw "Packaged launcher failed: $output" }
+            if ($process.ExitCode -ne 0 -or -not $output.Contains('Choose MRI folder') -or -not $output.Contains('Set simultaneous builds') -or -not ($output.Contains('Clean, format FAT32 and copy to selected USBs') -or $output.Contains('Prepare selected USBs (requires exact ERASE confirmation)'))) { throw "Packaged launcher failed: $output" }
             Write-Host 'PASS The actual packaged top-level launcher opens the selected-drive menu on Windows PowerShell 5.1.'
         } finally { $process.Dispose() }
         # Run the shipped startup suite from its actual App/tests location.

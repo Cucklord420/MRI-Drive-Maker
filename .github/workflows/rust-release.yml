@@ -78,3 +78,88 @@ jobs:
         run: |
           & ./tests/PackageSmoke.ps1 -ArchivePath $env:RUST_RELEASE_CANDIDATE
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Regression - build and launch exact v0.3.2 candidate in Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $versioned = Join-Path $env:RUNNER_TEMP 'MRI-Drive-Maker-v0.3.2-ci.zip'
+          cargo run --release --locked --manifest-path rust/mri-release/Cargo.toml -- --version 0.3.2 --output $versioned
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo run --release --locked --manifest-path rust/mri-release/Cargo.toml -- --verify $versioned
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & ./tests/PackageSmoke.ps1 -ArchivePath $versioned
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  publish-v032:
+    name: Publish MRI Drive Maker v0.3.2 after verified main merge
+    if: "github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'release(mri): publish v0.3.2')"
+    needs: [rust-release-verification, windows-release-smoke]
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Check out exact merged release source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Build, verify and exercise versioned release archive
+        shell: powershell
+        run: |
+          $actualHead = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actualHead -ne $env:GITHUB_SHA) { throw 'Checkout does not match the merged release commit.' }
+          $archive = Join-Path $env:RUNNER_TEMP 'MRI-Drive-Maker-v0.3.2.zip'
+          cargo run --release --locked --manifest-path rust/mri-release/Cargo.toml -- --version 0.3.2 --output $archive
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo run --release --locked --manifest-path rust/mri-release/Cargo.toml -- --verify $archive
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & ./tests/PackageSmoke.ps1 -ArchivePath $archive
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          $checksum = Join-Path $env:RUNNER_TEMP 'MRI-Drive-Maker-v0.3.2.zip.sha256'
+          [IO.File]::WriteAllText($checksum, "$hash  MRI-Drive-Maker-v0.3.2.zip`n", [Text.UTF8Encoding]::new($false))
+          $environmentLines = "RELEASE_ARCHIVE=$archive`nRELEASE_CHECKSUM=$checksum`nRELEASE_HASH=$hash`n"
+          [IO.File]::AppendAllText($env:GITHUB_ENV, $environmentLines, [Text.UTF8Encoding]::new($false))
+          Write-Host "Verified v0.3.2 candidate SHA256: $hash"
+      - name: Publish GitHub Release and verify downloaded asset
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = @'
+          ## Script-only workflow improvements
+          - Selecting a new MRI folder, ISO or ZIP preserves the saved concurrent build limit (default 4, configurable 1–30) without repeating the concurrency question.
+          - Menu 2 returns directly when there are no USB disks to select, and clearly labels the exact ERASE confirmation step.
+          - The README/quick-start instructions and packaged launcher smoke checks were updated. No executable, installer or runtime dependency was added to the workplace download.
+
+          ## Serial-less Kanguru USB support (retained from v0.3.1)
+          - Menu 2 supports one-time manual preparation of Kanguru FLASHBLU and other eligible USBs reporting serial 0, when Windows provides distinct connection identities.
+          - The erase operation still requires explicit disk-number selection and the displayed ERASE confirmation. Boot, system, source, and application disks remain excluded.
+          - The continuous registered-drive watcher still requires unique hardware serials.
+
+          **Use:** Download and extract MRI-Drive-Maker-v0.3.2.zip, then right-click START-MRI-DRIVE-MAKER.cmd and choose Run as administrator. Choose menu 1 for your authorized MRI files, then menu 2 to select target USBs. Keep selected USBs connected throughout the operation.
+
+          **Testing:** Rust formatting, strict Clippy, release integrity tests, Windows PowerShell selection/safety tests and packaged-launcher smoke tests run in GitHub Actions. No physical Kanguru drives, MRI firmware boot or proprietary MRI payload have been validated. A Windows connection ID is not a permanent hardware serial. Do not swap or move the USBs during preparation.
+
+          Work-PC menu refinement: https://github.com/Cucklord420/MRI-Drive-Maker/pull/96
+          Original serial-less Kanguru fix: https://github.com/Cucklord420/MRI-Drive-Maker/pull/92
+          Hardware acceptance remains open: https://github.com/Cucklord420/MRI-Drive-Maker/issues/85
+          '@
+          gh release create v0.3.2 "$env:RELEASE_ARCHIVE" "$env:RELEASE_CHECKSUM" --repo "$env:GITHUB_REPOSITORY" --target "$env:GITHUB_SHA" --title 'MRI Drive Maker v0.3.2' --notes $notes
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $release = gh release view v0.3.2 --repo "$env:GITHUB_REPOSITORY" --json tagName,isDraft,assets | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $release.tagName -ne 'v0.3.2' -or $release.isDraft) { throw 'Published release readback failed.' }
+          $assetNames = @($release.assets | ForEach-Object { $_.name })
+          if ('MRI-Drive-Maker-v0.3.2.zip' -notin $assetNames -or 'MRI-Drive-Maker-v0.3.2.zip.sha256' -notin $assetNames) {
+            throw 'Published release is missing the ZIP or checksum.'
+          }
+          $tagSha = (gh api "repos/$env:GITHUB_REPOSITORY/git/ref/tags/v0.3.2" --jq '.object.sha').Trim()
+          if ($LASTEXITCODE -ne 0 -or $tagSha -ne $env:GITHUB_SHA) { throw 'Published release tag points to an unexpected commit.' }
+          $verificationDir = Join-Path $env:RUNNER_TEMP 'mri-v032-readback'
+          [void][IO.Directory]::CreateDirectory($verificationDir)
+          gh release download v0.3.2 --repo "$env:GITHUB_REPOSITORY" --pattern 'MRI-Drive-Maker-v0.3.2.zip' --dir $verificationDir
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $downloaded = Join-Path $verificationDir 'MRI-Drive-Maker-v0.3.2.zip'
+          $downloadHash = (Get-FileHash -LiteralPath $downloaded -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($downloadHash -ne $env:RELEASE_HASH) { throw 'Published ZIP differs from the tested release candidate.' }
+          Write-Host "Verified published release v0.3.2 at commit $tagSha SHA256 $downloadHash"
