@@ -267,6 +267,47 @@ mod tests {
         assert!(policy(&mixed).is_ok());
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn lowercase_property_names_match_original_windows_powershell() {
+        let temp = tempfile::tempdir().expect("owned source fixture");
+        let mut config = base();
+        config["SourcePath"] = json!(temp.path().to_string_lossy().to_string());
+        let object = config.as_object().expect("fixture object");
+        let lower = Value::Object(
+            object
+                .iter()
+                .map(|(name, value)| (name.to_ascii_lowercase(), value.clone()))
+                .collect(),
+        );
+        assert!(policy(&lower).is_ok(), "Rust must accept original key casing");
+
+        let input = temp.path().join("config.json");
+        std::fs::write(&input, serde_json::to_vec(&lower).expect("JSON"))
+            .expect("write owned fixture");
+        let module = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../MRI.Batch.psm1");
+        let output = std::process::Command::new("powershell.exe")
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Import-Module -Name $env:MRI_TEST_MODULE -Force -DisableNameChecking; $config = Get-Content -LiteralPath $env:MRI_TEST_CONFIG -Raw | ConvertFrom-Json; Assert-MRIConfig -Config $config; 'ACCEPTED'",
+            ])
+            .env("MRI_TEST_MODULE", module)
+            .env("MRI_TEST_CONFIG", input)
+            .output()
+            .expect("Windows PowerShell 5.1");
+        assert!(
+            output.status.success()
+                && String::from_utf8_lossy(&output.stdout).contains("ACCEPTED"),
+            "original PowerShell rejected same lowercase-key fixture: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     #[test]
     fn rejects_ambiguous_case_insensitive_property_names() {
         let mut input = base();
