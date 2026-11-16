@@ -8,7 +8,10 @@ use std::process::{Command, Output};
 use zip::ZipArchive;
 
 fn run_original_script(script: &Path) -> Output {
+    // A PowerShell 7 CI parent can leak incompatible module paths through Cargo.
+    // Let Windows PowerShell 5.1 reconstruct its system module search path.
     Command::new("powershell.exe")
+        .env_remove("PSModulePath")
         .args([
             "-NoLogo",
             "-NoProfile",
@@ -65,6 +68,7 @@ fn downloaded_script_is_blocked_until_trusted_fixture_is_explicitly_unblocked() 
 
     // Confirm this test does not silently fall back to a weaker effective policy.
     let policy = Command::new("powershell.exe")
+        .env_remove("PSModulePath")
         .args([
             "-NoLogo",
             "-NoProfile",
@@ -114,6 +118,7 @@ fn downloaded_script_is_blocked_until_trusted_fixture_is_explicitly_unblocked() 
     // Unblock only the owned verified fixture, not the runner's global policy.
     // Production instructions require the operator to verify trust first.
     let unblock = Command::new("powershell.exe")
+        .env_remove("PSModulePath")
         .args([
             "-NoLogo",
             "-NoProfile",
