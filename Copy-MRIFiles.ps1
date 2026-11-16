@@ -20,7 +20,10 @@ try {
         $target=Join-MRIPath $plan.TargetRoot $entry.RelativePath
         $item=Get-Item -LiteralPath $source -Force -ErrorAction Stop
         if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'The source became a link.' }
-        if ($entry.IsDirectory) { [MRIBatch.NativeFiles]::CreateDirectory($target) }
+        if ($entry.IsDirectory) {
+            if (-not $item.PSIsContainer) { throw 'The source changed before copying.' }
+            [MRIBatch.NativeFiles]::CreateDirectory($target)
+        }
         else {
             if ($item.PSIsContainer -or $item.Length -ne $entry.Length) { throw 'The source changed before copying.' }
             # Native Unicode file APIs accept volume GUID names. The source
