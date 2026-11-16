@@ -173,4 +173,54 @@ mod tests {
         assert!(receipt_path(root, "/outside").is_err());
         assert!(receipt_path(root, "C:\\outside").is_err());
     }
+
+    #[test]
+    fn repeated_receipt_paths_cannot_hide_conflicting_content() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::write(root.join("bootmgr"), b"known").unwrap();
+        let receipt = json!({"TargetManifest": compute(root, true, false).unwrap()});
+        let entry = receipt["TargetManifest"]["Entries"][0].clone();
+
+        // The original PowerShell builds a case-insensitive hashtable, so
+        // identical receipt entries are allowed but both are hash-checked.
+        let mut repeated = receipt.clone();
+        repeated["TargetManifest"]["Entries"]
+            .as_array_mut()
+            .unwrap()
+            .push(entry.clone());
+        assert!(verify(root, Some(&repeated)).unwrap());
+
+        let mut conflicting_size = repeated.clone();
+        conflicting_size["TargetManifest"]["Entries"][1]["Length"] = json!(999);
+        assert_eq!(
+            verify(root, Some(&conflicting_size)).unwrap_err(),
+            ENTRY_MISMATCH
+        );
+
+        // If the final duplicate matches the real layout, the earlier entry
+        // must still undergo full file-size validation.
+        let mut first_size = repeated.clone();
+        first_size["TargetManifest"]["Entries"][0]["Length"] = json!(999);
+        assert_eq!(
+            verify(root, Some(&first_size)).unwrap_err(),
+            "File size mismatch: bootmgr"
+        );
+
+        let mut conflicting_hash = repeated.clone();
+        conflicting_hash["TargetManifest"]["Entries"][1]["Sha256"] = json!("0".repeat(64));
+        assert_eq!(
+            verify(root, Some(&conflicting_hash)).unwrap_err(),
+            "SHA-256 mismatch: bootmgr"
+        );
+
+        #[cfg(windows)]
+        {
+            // Windows receipt lookups, like PowerShell hashtables, are
+            // case-insensitive. Verify both duplicate names are checked.
+            let mut case_variant = repeated;
+            case_variant["TargetManifest"]["Entries"][1]["RelativePath"] = json!("BOOTMGR");
+            assert!(verify(root, Some(&case_variant)).unwrap());
+        }
+    }
 }
