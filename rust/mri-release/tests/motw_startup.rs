@@ -58,7 +58,10 @@ fn downloaded_script_is_blocked_until_trusted_fixture_is_explicitly_unblocked() 
         .join("MRI-Drive-Maker-v0.3.2")
         .join("App")
         .join("MRI-Batch.ps1");
-    assert!(script.is_file(), "the packaged PowerShell entry point is missing");
+    assert!(
+        script.is_file(),
+        "the packaged PowerShell entry point is missing"
+    );
 
     // Confirm this test does not silently fall back to a weaker effective policy.
     let policy = Command::new("powershell.exe")
@@ -73,7 +76,10 @@ fn downloaded_script_is_blocked_until_trusted_fixture_is_explicitly_unblocked() 
         ])
         .output()
         .expect("query effective execution policy");
-    assert!(policy.status.success(), "could not inspect execution policy");
+    assert!(
+        policy.status.success(),
+        "could not inspect execution policy"
+    );
     assert_eq!(
         String::from_utf8_lossy(&policy.stdout).trim(),
         "RemoteSigned",
