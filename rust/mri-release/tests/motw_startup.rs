@@ -109,9 +109,13 @@ fn downloaded_script_is_blocked_until_trusted_fixture_is_explicitly_unblocked() 
         String::from_utf8_lossy(&blocked.stdout),
         String::from_utf8_lossy(&blocked.stderr)
     );
+    let normalized_diagnostic = diagnostic
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
     assert!(
-        !blocked.status.success()
-            && diagnostic.to_ascii_lowercase().contains("digitally signed"),
+        !blocked.status.success() && normalized_diagnostic.contains("not digitally signed"),
         "Internet-zone-marked unsigned script did not fail for the expected signing reason: {diagnostic}"
     );
 
