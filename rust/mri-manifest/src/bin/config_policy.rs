@@ -79,6 +79,23 @@ fn policy(input: &Value) -> Result<Value, String> {
         "MaximumDiskBytes",
         "SerializeSetup",
     ];
+    // PowerShell's ConvertFrom-Json exposes case-insensitive PSObject properties.
+    // Normalize known field names once, without allowing ambiguous duplicates.
+    let mut fields = serde_json::Map::new();
+    let object = input.as_object().ok_or("Configuration must be an object.")?;
+    for (name, value) in object {
+        let canonical = names
+            .iter()
+            .copied()
+            .chain(std::iter::once("SourceKind"))
+            .find(|field| field.eq_ignore_ascii_case(name))
+            .unwrap_or(name);
+        if fields.insert(canonical.to_owned(), value.clone()).is_some() {
+            return Err(format!("Ambiguous configuration setting: {canonical}"));
+        }
+    }
+    let normalized = Value::Object(fields);
+    let input = &normalized;
     for field in names {
         if input.get(field).is_none() {
             return Err(format!("Missing setting: {field}"));
@@ -231,6 +248,33 @@ mod tests {
             "MaximumDiskBytes": 64000000000_i64,
             "SerializeSetup": false
         })
+    }
+
+    #[test]
+    fn accepts_case_insensitive_configuration_property_names() {
+        let base = base();
+        let object = base.as_object().expect("fixture is an object");
+        let lower = Value::Object(
+            object
+                .iter()
+                .map(|(name, value)| (name.to_ascii_lowercase(), value.clone()))
+                .collect(),
+        );
+        assert_eq!(policy(&lower), policy(&base));
+
+        let mut mixed = lower;
+        mixed["sourcekind"] = json!("folder");
+        assert!(policy(&mixed).is_ok());
+    }
+
+    #[test]
+    fn rejects_ambiguous_case_insensitive_property_names() {
+        let mut input = base();
+        input["maxparallel"] = json!(31);
+        assert_eq!(
+            policy(&input).unwrap_err(),
+            "Ambiguous configuration setting: MaxParallel"
+        );
     }
 
     #[test]
