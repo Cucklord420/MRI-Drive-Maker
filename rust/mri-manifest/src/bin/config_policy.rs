@@ -82,7 +82,9 @@ fn policy(input: &Value) -> Result<Value, String> {
     // PowerShell's ConvertFrom-Json exposes case-insensitive PSObject properties.
     // Normalize known field names once, without allowing ambiguous duplicates.
     let mut fields = serde_json::Map::new();
-    let object = input.as_object().ok_or("Configuration must be an object.")?;
+    let object = input
+        .as_object()
+        .ok_or("Configuration must be an object.")?;
     for (name, value) in object {
         let canonical = names
             .iter()
@@ -280,13 +282,15 @@ mod tests {
                 .map(|(name, value)| (name.to_ascii_lowercase(), value.clone()))
                 .collect(),
         );
-        assert!(policy(&lower).is_ok(), "Rust must accept original key casing");
+        assert!(
+            policy(&lower).is_ok(),
+            "Rust must accept original key casing"
+        );
 
         let input = temp.path().join("config.json");
         std::fs::write(&input, serde_json::to_vec(&lower).expect("JSON"))
             .expect("write owned fixture");
-        let module = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../MRI.Batch.psm1");
+        let module = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../MRI.Batch.psm1");
         let output = std::process::Command::new("powershell.exe")
             .args([
                 "-NoLogo",
@@ -300,8 +304,7 @@ mod tests {
             .output()
             .expect("Windows PowerShell 5.1");
         assert!(
-            output.status.success()
-                && String::from_utf8_lossy(&output.stdout).contains("ACCEPTED"),
+            output.status.success() && String::from_utf8_lossy(&output.stdout).contains("ACCEPTED"),
             "original PowerShell rejected same lowercase-key fixture: stdout={} stderr={}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
