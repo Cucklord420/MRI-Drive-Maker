@@ -78,7 +78,10 @@ fn downloaded_script_is_blocked_until_trusted_fixture_is_explicitly_unblocked() 
         .expect("query effective execution policy");
     assert!(
         policy.status.success(),
-        "could not inspect execution policy"
+        "could not inspect execution policy: status={} stdout={} stderr={}",
+        policy.status,
+        String::from_utf8_lossy(&policy.stdout),
+        String::from_utf8_lossy(&policy.stderr)
     );
     assert_eq!(
         String::from_utf8_lossy(&policy.stdout).trim(),
