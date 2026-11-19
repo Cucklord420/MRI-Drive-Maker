@@ -682,6 +682,7 @@ function Get-MRIWorkerExecutable {
 }
 function Get-MRISourceIdentitySnapshot {
     param([string]$Root,[scriptblock]$Guard)
+    Initialize-MRINative
     $temporaryRoot=[IO.Path]::GetTempPath()
     $fullRoot=[IO.Path]::GetFullPath($Root)
     $rootForCheck=$fullRoot.TrimEnd([char[]]@('\','/'))
@@ -871,6 +872,7 @@ function Invoke-MRISetupCommand {
 }
 function Invoke-MRICopy {
     param($Config,$Target,$Manifest,[string]$WorkPath,[scriptblock]$Guard,[string]$CancelPath)
+    Initialize-MRINative
     $planPath=Join-Path $WorkPath 'copy-plan.json'
     $planHash=Write-MRIJson $planPath ([pscustomobject]@{SourceRoot=$Config.SourcePath;TargetRoot=$Target.Path;Manifest=$Manifest}) -PassThruHash
     $arguments=@('-NoLogo','-NoProfile','-ExecutionPolicy','RemoteSigned','-File',(Join-Path $PSScriptRoot 'Copy-MRIFiles.ps1'),'-PlanPath',$planPath,'-ExpectedHash',$planHash)

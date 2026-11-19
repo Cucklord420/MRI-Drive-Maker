@@ -452,6 +452,78 @@ mod windows {
         Ok(handle)
     }
 
+    fn open_target_directory(path: &str) -> Result<Handle, String> {
+        let name = wide(path);
+        // Keep the destination directory pinned against rename or deletion
+        // while copying. Destination identity is not used for source parity;
+        // only its type and reparse status need to be checked here.
+        // SAFETY: `name` is NUL-terminated, and all other arguments are scalar/null.
+        let raw = unsafe {
+            CreateFileW(
+                name.as_ptr(),
+                FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+                FILE_SHARE_READ,
+                null(),
+                OPEN_EXISTING,
+                FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
+                null_mut(),
+            )
+        };
+        if raw == INVALID_HANDLE_VALUE {
+            return Err(win_error(&format!("Cannot open target directory {path}")));
+        }
+        let handle = Handle(raw);
+        let (is_directory, attributes) = query_directory(&handle)?;
+        if !is_directory {
+            return Err(format!("Target path is not a directory: {path}"));
+        }
+        if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(format!("Target path is a link or reparse point: {path}"));
+        }
+        Ok(handle)
+    }
+
+    fn query_directory(handle: &Handle) -> Result<(bool, u32), String> {
+        let mut standard = FileStandardInfo {
+            allocation_size: 0,
+            end_of_file: 0,
+            number_of_links: 0,
+            delete_pending: 0,
+            directory: 0,
+        };
+        let mut attributes = FileAttributeTagInfo {
+            attributes: 0,
+            reparse_tag: 0,
+        };
+        // SAFETY: each structure has the documented layout and exact size for its info class.
+        let ok_standard = unsafe {
+            GetFileInformationByHandleEx(
+                handle.raw(),
+                FILE_STANDARD_INFO_CLASS,
+                (&mut standard as *mut FileStandardInfo).cast(),
+                std::mem::size_of::<FileStandardInfo>() as u32,
+            )
+        };
+        if ok_standard == 0 {
+            return Err(win_error("Cannot read target directory type"));
+        }
+        // SAFETY: same as above for FILE_ATTRIBUTE_TAG_INFO.
+        let ok_attributes = unsafe {
+            GetFileInformationByHandleEx(
+                handle.raw(),
+                FILE_ATTRIBUTE_TAG_INFO_CLASS,
+                (&mut attributes as *mut FileAttributeTagInfo).cast(),
+                std::mem::size_of::<FileAttributeTagInfo>() as u32,
+            )
+        };
+        if ok_attributes == 0 {
+            return Err(win_error(
+                "Cannot read target directory reparse-point status",
+            ));
+        }
+        Ok((standard.directory != 0, attributes.attributes))
+    }
+
     fn open_ancestor(
         path: &str,
         is_source_root: bool,
@@ -852,12 +924,8 @@ mod windows {
         entries: &[ManifestEntry],
     ) -> Result<(), String> {
         let root = absolute_extended(target_root)?;
-        let root_handle =
-            open(&root, true).map_err(|_| "Copy target root is unavailable or unsafe")?;
-        let (_, is_directory, _, attributes) = query(&root_handle)?;
-        if !is_directory || attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-            return Err("Copy target root must be a plain directory".into());
-        }
+        let root_handle = open_target_directory(&root)
+            .map_err(|error| format!("Copy target root is unavailable or unsafe: {error}"))?;
         let mut target_directory_locks = vec![root_handle];
         let mut directories: Vec<_> = entries.iter().filter(|entry| entry.is_directory).collect();
         directories.sort_by_key(|entry| {
@@ -879,15 +947,12 @@ mod windows {
                     )));
                 }
             }
-            let handle = open(&path, true)
-                .map_err(|_| format!("Target directory is not plain: {}", entry.relative_path))?;
-            let (_, is_directory, _, attributes) = query(&handle)?;
-            if !is_directory || attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-                return Err(format!(
-                    "Target directory became unsafe: {}",
+            let handle = open_target_directory(&path).map_err(|error| {
+                format!(
+                    "Target directory is not plain: {}: {error}",
                     entry.relative_path
-                ));
-            }
+                )
+            })?;
             target_directory_locks.push(handle);
         }
         for entry in entries.iter().filter(|entry| !entry.is_directory) {
@@ -1207,6 +1272,40 @@ mod windows {
             create_directory_junction(&original, &alternate);
             let error = copy_plan_inner(&plan_path, &expected_hash).unwrap_err();
             assert!(error.contains("reparse point"), "{error}");
+            assert_eq!(fs::read_dir(&target).unwrap().count(), 0);
+        }
+
+        #[test]
+        fn directory_replaced_by_file_fails_before_any_target_file_write() {
+            let (_temp, source, target) = fixture();
+            let snapshot = capture_snapshot_impl(&source).unwrap();
+            let manifest = manifest_from_snapshot(&snapshot);
+            let (plan_path, expected_hash) =
+                authenticated_copy_plan(&_temp, &source, &target, &manifest, &snapshot);
+            let original = source.join("nested");
+            let moved = _temp.path().join("nested.original");
+            fs::rename(&original, &moved).unwrap();
+            fs::write(&original, b"ordinary replacement file").unwrap();
+
+            let error = copy_plan_inner(&plan_path, &expected_hash).unwrap_err();
+            assert!(error.contains("Source path type changed"), "{error}");
+            assert_eq!(fs::read_dir(&target).unwrap().count(), 0);
+        }
+
+        #[test]
+        fn file_replaced_by_directory_fails_before_any_target_file_write() {
+            let (_temp, source, target) = fixture();
+            let snapshot = capture_snapshot_impl(&source).unwrap();
+            let manifest = manifest_from_snapshot(&snapshot);
+            let (plan_path, expected_hash) =
+                authenticated_copy_plan(&_temp, &source, &target, &manifest, &snapshot);
+            let original = source.join("nested\\payload.bin");
+            let moved = _temp.path().join("payload.original");
+            fs::rename(&original, &moved).unwrap();
+            fs::create_dir(&original).unwrap();
+
+            let error = copy_plan_inner(&plan_path, &expected_hash).unwrap_err();
+            assert!(error.contains("Source path type changed"), "{error}");
             assert_eq!(fs::read_dir(&target).unwrap().count(), 0);
         }
 
