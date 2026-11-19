@@ -246,35 +246,38 @@ mod windows {
     const CREATE_NEW: u32 = 1;
     const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
     const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x0000_0010;
     const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+    const FILE_READ_ONLY_VOLUME: u32 = 0x0008_0000;
     const FILE_BEGIN: u32 = 0;
-    const FILE_ATTRIBUTE_TAG_INFO_CLASS: i32 = 9;
-    const FILE_STANDARD_INFO_CLASS: i32 = 1;
     const FILE_ID_INFO_CLASS: i32 = 18;
+    const ERROR_INVALID_FUNCTION: u32 = 1;
+    const ERROR_NOT_SUPPORTED: u32 = 50;
+    const ERROR_INVALID_PARAMETER: u32 = 87;
     const ERROR_FILE_NOT_FOUND: u32 = 2;
     const ERROR_PATH_NOT_FOUND: u32 = 3;
     const ERROR_ALREADY_EXISTS: u32 = 183;
     const INVALID_FILE_ATTRIBUTES: u32 = u32::MAX;
 
     #[repr(C)]
-    struct FileAttributeTagInfo {
-        attributes: u32,
-        reparse_tag: u32,
-    }
-
-    #[repr(C)]
-    struct FileStandardInfo {
-        allocation_size: i64,
-        end_of_file: i64,
-        number_of_links: u32,
-        delete_pending: u8,
-        directory: u8,
-    }
-
-    #[repr(C)]
     struct FileIdInfo {
         volume_serial: u64,
         file_id: [u8; 16],
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct ByHandleFileInformation {
+        file_attributes: u32,
+        creation_time: [u32; 2],
+        last_access_time: [u32; 2],
+        last_write_time: [u32; 2],
+        volume_serial: u32,
+        file_size_high: u32,
+        file_size_low: u32,
+        number_of_links: u32,
+        file_index_high: u32,
+        file_index_low: u32,
     }
 
     // SAFETY: These signatures match the Win32 declarations. The wrappers below
@@ -295,6 +298,17 @@ mod windows {
             info_class: i32,
             info: *mut c_void,
             size: u32,
+        ) -> i32;
+        fn GetFileInformationByHandle(file: HandleRaw, info: *mut ByHandleFileInformation) -> i32;
+        fn GetVolumeInformationByHandleW(
+            file: HandleRaw,
+            volume_name: *mut u16,
+            volume_name_size: u32,
+            volume_serial: *mut u32,
+            maximum_component_length: *mut u32,
+            filesystem_flags: *mut u32,
+            filesystem_name: *mut u16,
+            filesystem_name_size: u32,
         ) -> i32;
         fn ReadFile(
             file: HandleRaw,
@@ -484,44 +498,11 @@ mod windows {
     }
 
     fn query_directory(handle: &Handle) -> Result<(bool, u32), String> {
-        let mut standard = FileStandardInfo {
-            allocation_size: 0,
-            end_of_file: 0,
-            number_of_links: 0,
-            delete_pending: 0,
-            directory: 0,
-        };
-        let mut attributes = FileAttributeTagInfo {
-            attributes: 0,
-            reparse_tag: 0,
-        };
-        // SAFETY: each structure has the documented layout and exact size for its info class.
-        let ok_standard = unsafe {
-            GetFileInformationByHandleEx(
-                handle.raw(),
-                FILE_STANDARD_INFO_CLASS,
-                (&mut standard as *mut FileStandardInfo).cast(),
-                std::mem::size_of::<FileStandardInfo>() as u32,
-            )
-        };
-        if ok_standard == 0 {
-            return Err(win_error("Cannot read target directory type"));
-        }
-        // SAFETY: same as above for FILE_ATTRIBUTE_TAG_INFO.
-        let ok_attributes = unsafe {
-            GetFileInformationByHandleEx(
-                handle.raw(),
-                FILE_ATTRIBUTE_TAG_INFO_CLASS,
-                (&mut attributes as *mut FileAttributeTagInfo).cast(),
-                std::mem::size_of::<FileAttributeTagInfo>() as u32,
-            )
-        };
-        if ok_attributes == 0 {
-            return Err(win_error(
-                "Cannot read target directory reparse-point status",
-            ));
-        }
-        Ok((standard.directory != 0, attributes.attributes))
+        let information = file_information(handle)?;
+        Ok((
+            information.file_attributes & FILE_ATTRIBUTE_DIRECTORY != 0,
+            information.file_attributes,
+        ))
     }
 
     fn open_ancestor(
@@ -561,20 +542,33 @@ mod windows {
     }
 
     fn query(handle: &Handle) -> Result<(FileIdentity, bool, u64, u32), String> {
+        let information = file_information(handle)?;
+        let identity = identity_from_handle(handle, &information)?;
+        let is_directory = information.file_attributes & FILE_ATTRIBUTE_DIRECTORY != 0;
+        let length = if is_directory {
+            0
+        } else {
+            (u64::from(information.file_size_high) << 32) | u64::from(information.file_size_low)
+        };
+        Ok((identity, is_directory, length, information.file_attributes))
+    }
+
+    fn file_information(handle: &Handle) -> Result<ByHandleFileInformation, String> {
+        let mut information = ByHandleFileInformation::default();
+        // SAFETY: the output points to a correctly laid out structure for the open handle.
+        if unsafe { GetFileInformationByHandle(handle.raw(), &mut information) } == 0 {
+            return Err(win_error("Cannot read file attributes and size"));
+        }
+        Ok(information)
+    }
+
+    fn identity_from_handle(
+        handle: &Handle,
+        legacy: &ByHandleFileInformation,
+    ) -> Result<FileIdentity, String> {
         let mut id = FileIdInfo {
             volume_serial: 0,
             file_id: [0; 16],
-        };
-        let mut standard = FileStandardInfo {
-            allocation_size: 0,
-            end_of_file: 0,
-            number_of_links: 0,
-            delete_pending: 0,
-            directory: 0,
-        };
-        let mut attributes = FileAttributeTagInfo {
-            attributes: 0,
-            reparse_tag: 0,
         };
         // SAFETY: each structure has the documented layout and exact size for its info class.
         let ok_id = unsafe {
@@ -585,43 +579,46 @@ mod windows {
                 std::mem::size_of::<FileIdInfo>() as u32,
             )
         };
-        if ok_id == 0 {
-            return Err(win_error("Cannot read source file identity"));
+        if ok_id != 0 {
+            if let Ok(identity) = identity_from_file_id(&id) {
+                return Ok(identity);
+            }
+        } else {
+            // GetLastError must be read before querying volume capabilities.
+            // SAFETY: GetLastError has no preconditions and follows the failed call.
+            let error = unsafe { GetLastError() };
+            if ![
+                ERROR_INVALID_FUNCTION,
+                ERROR_NOT_SUPPORTED,
+                ERROR_INVALID_PARAMETER,
+            ]
+            .contains(&error)
+            {
+                return Err(format!(
+                    "Cannot read source file identity (Windows error {error})"
+                ));
+            }
         }
-        let identity = identity_from_file_id(&id)?;
-        // SAFETY: same as above for FILE_STANDARD_INFO.
-        let ok_standard = unsafe {
-            GetFileInformationByHandleEx(
+        let mut filesystem_flags = 0;
+        // SAFETY: optional outputs are null; the flags pointer is writable.
+        if unsafe {
+            GetVolumeInformationByHandleW(
                 handle.raw(),
-                FILE_STANDARD_INFO_CLASS,
-                (&mut standard as *mut FileStandardInfo).cast(),
-                std::mem::size_of::<FileStandardInfo>() as u32,
+                null_mut(),
+                0,
+                null_mut(),
+                null_mut(),
+                &mut filesystem_flags,
+                null_mut(),
+                0,
             )
-        };
-        if ok_standard == 0 {
-            return Err(win_error("Cannot read source file type and size"));
+        } == 0
+        {
+            return Err(win_error(
+                "Cannot determine whether the source filesystem is read-only",
+            ));
         }
-        // SAFETY: same as above for FILE_ATTRIBUTE_TAG_INFO.
-        let ok_attributes = unsafe {
-            GetFileInformationByHandleEx(
-                handle.raw(),
-                FILE_ATTRIBUTE_TAG_INFO_CLASS,
-                (&mut attributes as *mut FileAttributeTagInfo).cast(),
-                std::mem::size_of::<FileAttributeTagInfo>() as u32,
-            )
-        };
-        if ok_attributes == 0 {
-            return Err(win_error("Cannot read source reparse-point status"));
-        }
-        if standard.end_of_file < 0 {
-            return Err("Windows returned a negative source file size".into());
-        }
-        Ok((
-            identity,
-            standard.directory != 0,
-            standard.end_of_file as u64,
-            attributes.attributes,
-        ))
+        identity_from_legacy_file_info(legacy, filesystem_flags & FILE_READ_ONLY_VOLUME != 0)
     }
 
     fn identity_from_file_id(information: &FileIdInfo) -> Result<FileIdentity, String> {
@@ -635,6 +632,29 @@ mod windows {
                 .iter()
                 .map(|byte| format!("{byte:02x}"))
                 .collect(),
+        })
+    }
+
+    fn identity_from_legacy_file_info(
+        information: &ByHandleFileInformation,
+        read_only_volume: bool,
+    ) -> Result<FileIdentity, String> {
+        if !read_only_volume {
+            return Err(
+                "Source filesystem does not provide a usable 128-bit file identity and is writable"
+                    .into(),
+            );
+        }
+        let file_id =
+            (u64::from(information.file_index_high) << 32) | u64::from(information.file_index_low);
+        if file_id == 0 {
+            return Err(
+                "Read-only source filesystem does not provide a usable legacy file identity".into(),
+            );
+        }
+        Ok(FileIdentity {
+            volume_serial: format!("readonly:{:08x}", information.volume_serial),
+            file_id: format!("{:016x}", file_id),
         })
     }
 
@@ -1185,6 +1205,30 @@ mod windows {
                     file_id: "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a".to_owned(),
                 }
             );
+        }
+
+        #[test]
+        fn legacy_file_identity_is_only_accepted_on_a_read_only_volume() {
+            let information = ByHandleFileInformation {
+                volume_serial: 0x1234_abcd,
+                file_index_high: 0x1234,
+                file_index_low: 0x5678_9abc,
+                ..ByHandleFileInformation::default()
+            };
+            assert!(identity_from_legacy_file_info(&information, false).is_err());
+            assert_eq!(
+                identity_from_legacy_file_info(&information, true).unwrap(),
+                FileIdentity {
+                    volume_serial: "readonly:1234abcd".to_owned(),
+                    file_id: "0000123456789abc".to_owned(),
+                }
+            );
+            let zero_id = ByHandleFileInformation {
+                file_index_high: 0,
+                file_index_low: 0,
+                ..information
+            };
+            assert!(identity_from_legacy_file_info(&zero_id, true).is_err());
         }
 
         fn create_directory_junction(link: &Path, target: &Path) {
