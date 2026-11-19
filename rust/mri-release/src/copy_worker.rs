@@ -6,7 +6,9 @@
 use serde::{Deserialize, Serialize};
 #[cfg(windows)]
 use sha2::Digest;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+#[cfg(windows)]
+use std::collections::BTreeSet;
 use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -106,10 +108,10 @@ fn validate_copy_plan(
     let snapshot = plan
         .manifest
         .source_identity
-        .as_ref()
+        .clone()
         .ok_or("Copy plan has no source identity snapshot")?;
-    validate_manifest(&plan.manifest.entries, snapshot)?;
-    Ok((plan, snapshot.clone()))
+    validate_manifest(&plan.manifest.entries, &snapshot)?;
+    Ok((plan, snapshot))
 }
 
 #[cfg(windows)]
@@ -633,17 +635,12 @@ mod windows {
                 .to_str()
                 .ok_or("Source contains a path name that is not valid Unicode")?
                 .to_owned();
-            validate_relative_path(if relative_directory.is_empty() {
-                &name
-            } else {
-                // Temporary string is kept alive for this validation call.
-                &format!("{relative_directory}\\{name}")
-            })?;
             let relative = if relative_directory.is_empty() {
                 name
             } else {
                 format!("{relative_directory}\\{name}")
             };
+            validate_relative_path(&relative)?;
             let child_path = append_path(
                 directory,
                 &relative[relative_directory.len()..].trim_start_matches('\\'),

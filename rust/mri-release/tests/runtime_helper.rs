@@ -51,7 +51,7 @@ fn packaged_runtime_helper_captures_a_synthetic_source_snapshot() {
     package.extract(temp.path()).unwrap();
     let helper = temp.path().join("MRI-Drive-Maker-v0.3.0/App/mri-copy.exe");
     let snapshot = temp.path().join("source-identity.json");
-    let captured = Command::new(helper)
+    let captured = Command::new(&helper)
         .arg("--snapshot")
         .arg(&source)
         .arg(&snapshot)
