@@ -1,6 +1,11 @@
 OPEN: START-MRI-DRIVE-MAKER.cmd
 Right-click it and choose Run as administrator.
 
+For a source archive from Code > Download ZIP, run this command from its
+extracted root before launching: cargo build --locked --manifest-path
+rust/mri-release/Cargo.toml. The Rust copy helper is required; copying stops
+safely if it is missing. Versioned release ZIPs already include the helper.
+
 If Windows blocks the downloaded script before the menu opens:
 Only for a verified, trusted GitHub download, right-click the original ZIP,
 choose Properties > General > Unblock (if shown), Apply, then extract
@@ -26,6 +31,8 @@ open. Shared USB bandwidth limits speed.
 The selected folder is copied exactly to the root, without a wrapper.
 Preparation creates active MBR/FAT32 using up to 32,000,000,000 bytes.
 Every target file receives SHA-256 verification after writes are flushed.
+Source filesystems must provide usable file identities; unsupported filesystems
+fail closed before target-file copying begins.
 System, source and application disks are excluded. Serial-less USBs
 can be selected once in menu 2 using an unambiguous Windows connection
 path. Never unplug, swap or move a serial-less drive during the batch;

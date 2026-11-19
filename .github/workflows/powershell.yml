@@ -40,6 +40,11 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: Build the Rust copy and identity helper for source smoke tests
+        shell: powershell
+        run: |
+          cargo build --locked --manifest-path rust/mri-release/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Test Windows PowerShell launcher, menus, and simulated builds
         shell: powershell
         run: |

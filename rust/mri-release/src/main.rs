@@ -12,6 +12,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use zip::{write::SimpleFileOptions, CompressionMethod, DateTime, ZipArchive, ZipWriter};
+mod copy_worker;
 
 #[cfg(test)]
 thread_local! {
@@ -37,6 +38,8 @@ struct Manifest {
     source_commit: String,
     launcher: String,
     source_files: IndexMap<String, String>,
+    #[serde(default)]
+    generated_files: IndexMap<String, Vec<String>>,
     sha256: IndexMap<String, String>,
 }
 fn repo_root() -> PathBuf {
@@ -44,6 +47,30 @@ fn repo_root() -> PathBuf {
 }
 fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
+}
+fn validate_runtime_helper(bytes: &[u8]) -> Result<(), String> {
+    if bytes.len() < 0x40 || &bytes[..2] != b"MZ" {
+        return Err("Rust runtime helper is not a Windows executable".into());
+    }
+    let pe_offset = u32::from_le_bytes(
+        bytes[0x3c..0x40]
+            .try_into()
+            .map_err(|_| "Malformed Windows executable header")?,
+    ) as usize;
+    let pe_end = pe_offset
+        .checked_add(26)
+        .filter(|end| *end <= bytes.len())
+        .ok_or("Malformed Windows executable header")?;
+    let pe_header = bytes
+        .get(pe_offset..pe_end)
+        .ok_or("Malformed Windows executable header")?;
+    if &pe_header[..4] != b"PE\0\0"
+        || u16::from_le_bytes([pe_header[4], pe_header[5]]) != 0x8664
+        || u16::from_le_bytes([pe_header[24], pe_header[25]]) != 0x020b
+    {
+        return Err("Rust runtime helper must be a 64-bit Windows executable".into());
+    }
+    Ok(())
 }
 fn is_git_environment_key(key: &OsStr) -> bool {
     key.to_string_lossy()
@@ -938,9 +965,13 @@ fn verify_with_limits(
     if names != expected {
         return Err("Unexpected package entries".into());
     }
-    if manifest.sha256.keys().collect::<BTreeSet<_>>()
-        != manifest.source_files.keys().collect::<BTreeSet<_>>()
-    {
+    let mut declared_files: BTreeSet<_> = manifest.source_files.keys().collect();
+    for name in manifest.generated_files.keys() {
+        if !declared_files.insert(name) {
+            return Err("A package file cannot be both committed and generated".into());
+        }
+    }
+    if manifest.sha256.keys().collect::<BTreeSet<_>>() != declared_files {
         return Err("Every packaged file must have a source origin".into());
     }
     for (name, source) in &manifest.source_files {
@@ -966,6 +997,41 @@ fn verify_with_limits(
             u64::try_from(source_contents.len()).map_err(|_| "Committed source size overflow")?;
         if source_bytes != verified.expanded_bytes || digest(&source_contents) != verified.sha256 {
             return Err(format!("Source differs from declared Git commit: {name}"));
+        }
+    }
+    for (name, sources) in &manifest.generated_files {
+        if name != "App/mri-copy.exe"
+            || sources.len() != 2
+            || sources[0] != "rust/mri-release/src/main.rs"
+            || sources[1] != "rust/mri-release/src/copy_worker.rs"
+        {
+            return Err(format!(
+                "Unexpected generated package file or origin: {name}"
+            ));
+        }
+        let verified = members
+            .get(&manifest_name(name, &prefix))
+            .ok_or("Missing generated package file")?;
+        if verified.sha256 != manifest.sha256[name] {
+            return Err(format!("Generated package file SHA-256 mismatch: {name}"));
+        }
+        for source in sources {
+            let source_size = committed_size_with_environment(
+                repo,
+                &manifest.source_commit,
+                source,
+                environment,
+            )?;
+            if source_size == 0 || source_size > limits.max_member_bytes {
+                return Err(format!(
+                    "Generated helper origin has invalid size: {source}"
+                ));
+            }
+            let contents =
+                committed_with_environment(repo, &manifest.source_commit, source, environment)?;
+            if contents.is_empty() {
+                return Err(format!("Generated package origin is empty: {source}"));
+            }
         }
     }
     let launchers: Vec<&str> = manifest
@@ -1165,6 +1231,17 @@ fn build_with_environment(
     sources: &[(String, String)],
     environment: &[(OsString, OsString)],
 ) -> Result<Manifest, String> {
+    build_with_environment_and_helper(repo, path, version, sources, environment, None)
+}
+
+fn build_with_environment_and_helper(
+    repo: &Path,
+    path: &Path,
+    version: &str,
+    sources: &[(String, String)],
+    environment: &[(OsString, OsString)],
+    runtime_helper: Option<&[u8]>,
+) -> Result<Manifest, String> {
     assert_git_identity(repo, environment)?;
     if !Regex::new(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,48}$")
         .unwrap()
@@ -1189,6 +1266,7 @@ fn build_with_environment(
     .to_owned();
     let mut entries = IndexMap::<String, Vec<u8>>::new();
     let mut origins = IndexMap::<String, String>::new();
+    let mut generated_files = IndexMap::<String, Vec<String>>::new();
     let mut insert = |source: &str, dest: &str| -> Result<(), String> {
         let content = committed_with_environment(repo, &revision, source, environment)?;
         entries.insert(dest.to_owned(), content);
@@ -1199,6 +1277,21 @@ fn build_with_environment(
         insert(source, destination)?;
     }
     drop(insert);
+    if let Some(helper) = runtime_helper {
+        validate_runtime_helper(helper)?;
+        let name = "App/mri-copy.exe".to_owned();
+        if entries.contains_key(&name) {
+            return Err("Runtime helper path collides with a committed package file".into());
+        }
+        entries.insert(name.clone(), helper.to_vec());
+        generated_files.insert(
+            name,
+            vec![
+                "rust/mri-release/src/main.rs".to_owned(),
+                "rust/mri-release/src/copy_worker.rs".to_owned(),
+            ],
+        );
+    }
     let sha256: IndexMap<String, String> = entries
         .iter()
         .map(|(name, bytes)| (name.clone(), digest(bytes)))
@@ -1208,6 +1301,7 @@ fn build_with_environment(
         source_commit: revision,
         launcher: "START-MRI-DRIVE-MAKER.cmd".to_owned(),
         source_files: origins,
+        generated_files,
         sha256,
     };
     let mut manifest_bytes = serde_json::to_string_pretty(&manifest)
@@ -1283,12 +1377,70 @@ fn build(repo: &Path, path: &Path, version: &str) -> Result<Manifest, String> {
     let sources = package_sources(repo)?;
     build_with_environment(repo, path, version, &sources, &process_environment())
 }
+fn build_runtime_package(repo: &Path, path: &Path, version: &str) -> Result<Manifest, String> {
+    if !cfg!(windows) {
+        return Err("Runtime packages must be built on Windows with the Rust copy worker".into());
+    }
+    let sources = package_sources(repo)?;
+    let executable =
+        std::env::current_exe().map_err(|e| format!("Cannot resolve release helper: {e}"))?;
+    let helper = fs::read(&executable).map_err(|e| format!("Cannot read release helper: {e}"))?;
+    build_with_environment_and_helper(
+        repo,
+        path,
+        version,
+        &sources,
+        &process_environment(),
+        Some(&helper),
+    )
+}
 fn main() {
+    let raw_args: Vec<OsString> = std::env::args_os().skip(1).collect();
+    if raw_args
+        .first()
+        .and_then(|arg| arg.to_str())
+        .is_some_and(|arg| arg == "--snapshot")
+    {
+        if raw_args.len() != 3 {
+            eprintln!("Usage: mri-copy --snapshot SOURCE_ROOT OUTPUT_JSON");
+            std::process::exit(2);
+        }
+        let result = copy_worker::write_snapshot(Path::new(&raw_args[1]), Path::new(&raw_args[2]));
+        if let Err(reason) = result {
+            eprintln!("{reason}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if raw_args
+        .first()
+        .and_then(|arg| arg.to_str())
+        .is_some_and(|arg| arg == "--copy")
+    {
+        if raw_args.len() != 3 {
+            eprintln!("Usage: mri-copy --copy PLAN_JSON EXPECTED_SHA256");
+            std::process::exit(2);
+        }
+        let Some(expected_hash) = raw_args[2].to_str() else {
+            eprintln!("Expected plan hash must be ASCII hexadecimal");
+            std::process::exit(2);
+        };
+        if let Err(reason) = copy_worker::copy_plan(Path::new(&raw_args[1]), expected_hash) {
+            eprintln!("{reason}");
+            std::process::exit(1);
+        }
+        return;
+    }
     let mut version = "0.3.0".to_owned();
     let mut output: Option<PathBuf> = None;
     let mut verify_path: Option<PathBuf> = None;
+    let mut source_only = false;
     let mut args = std::env::args().skip(1);
     while let Some(key) = args.next() {
+        if key == "--source-only" {
+            source_only = true;
+            continue;
+        }
         let Some(value) = args.next() else {
             eprintln!("Option is missing a value");
             std::process::exit(2);
@@ -1305,6 +1457,10 @@ fn main() {
     }
     let repo = repo_root();
     if let Some(path) = verify_path {
+        if source_only {
+            eprintln!("--source-only applies only to package builds");
+            std::process::exit(2);
+        }
         match verify(&repo, &path) {
             Ok(manifest) => println!(
                 "{}",
@@ -1320,9 +1476,18 @@ fn main() {
             }
         }
     } else {
+        if source_only && output.is_none() {
+            eprintln!("--source-only requires an explicit --output path");
+            std::process::exit(2);
+        }
         let path = output
             .unwrap_or_else(|| repo.join(format!("downloads/MRI-Drive-Maker-v{version}.zip")));
-        match build(&repo, &path, &version) {
+        let result = if source_only {
+            build(&repo, &path, &version)
+        } else {
+            build_runtime_package(&repo, &path, &version)
+        };
+        match result {
             Ok(manifest) => {
                 let bytes = fs::read(&path).expect("archive generated");
                 println!(
@@ -1332,6 +1497,7 @@ fn main() {
                         "sha256":digest(&bytes),
                         "bytes":bytes.len(),
                         "files":manifest.sha256.len()+1,
+                        "runtime_helper":!manifest.generated_files.is_empty(),
                         "source_commit":manifest.source_commit
                     })
                 );

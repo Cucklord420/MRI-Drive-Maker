@@ -19,6 +19,12 @@ try {
     if ($launchers.Count -ne 1 -or $launchers[0].Name -ne 'START-MRI-DRIVE-MAKER.cmd') { throw 'Package has competing top-level launchers.' }
     if ([IO.Directory]::Exists((Join-Path $package 'Developer')) -or [IO.Directory]::Exists((Join-Path $package 'legacy'))) { throw 'Historical files must stay out of the user download.' }
     $manifest=Read-MRIJson (Join-Path $package 'RELEASE.json')
+    $generated=$manifest.PSObject.Properties['generated_files']
+    $copyWorkerDeclared=$false
+    if ($null -ne $generated -and $null -ne $generated.Value) {
+        $copyWorkerDeclared=$null -ne $generated.Value.PSObject.Properties['App/mri-copy.exe']
+    }
+    if ($copyWorkerDeclared -and -not [IO.File]::Exists((Join-Path $package 'App/mri-copy.exe'))) { throw 'The Rust handle-anchored copy worker is missing from the runtime package.' }
     $actualFiles=@(Get-ChildItem -LiteralPath $package -Recurse -File)
     if ($actualFiles.Count -ne (@($manifest.sha256.PSObject.Properties).Count+1)) { throw 'Package contains undeclared files.' }
     foreach ($property in $manifest.sha256.PSObject.Properties) {

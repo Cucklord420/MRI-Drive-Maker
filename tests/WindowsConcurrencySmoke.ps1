@@ -22,7 +22,7 @@ try {
     try { $stream.SetLength(32MB) } finally { $stream.Dispose() }
     $cfg=Read-MRIJson (Join-Path $root 'mri-config.example.json')
     $cfg.SourcePath=$source; $cfg.SourceKind='Folder'; $cfg.PrepareDisk=$true; $cfg.MinimumDiskBytes=1
-    $manifest=Get-MRIManifest $source
+    $manifest=Get-MRIManifest $source -CaptureSourceIdentity
     foreach ($i in 1..4) {
         $image=Join-Path $temp ('owned-'+$i+'.vhd')
         $diskpart=Join-Path $temp ('create-'+$i+'.txt')
@@ -45,6 +45,7 @@ try {
     $app=Join-Path $temp 'Fixture App'
     [void][IO.Directory]::CreateDirectory($app)
     Copy-Item -LiteralPath (Join-Path $root 'NativeProcess.cs') -Destination $app
+    Copy-Item -LiteralPath (Get-MRIWorkerExecutable) -Destination (Join-Path $app 'mri-copy.exe')
     # Inject classification solely into a temporary copy, not production code.
     $moduleText=[IO.File]::ReadAllText((Join-Path $root 'MRI.Batch.psm1'))+@'
 
