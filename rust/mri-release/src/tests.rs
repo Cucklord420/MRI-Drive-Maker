@@ -883,7 +883,7 @@ fn generated_copy_worker_is_declared_with_committed_rust_origins_and_hash_checke
     assert_eq!(verified, manifest);
     let packaged = members(&archive);
     let helper_member = "MRI-Drive-Maker-v0.3.0/App/mri-copy.exe";
-    assert_eq!(packaged[&helper_member].0, helper);
+    assert_eq!(packaged[helper_member].0, helper);
 
     corrupt_member_payload(&archive, "/App/mri-copy.exe");
     assert!(verify_with_environment(&repo, &archive, &environment).is_err());

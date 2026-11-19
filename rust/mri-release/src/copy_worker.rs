@@ -643,7 +643,7 @@ mod windows {
             validate_relative_path(&relative)?;
             let child_path = append_path(
                 directory,
-                &relative[relative_directory.len()..].trim_start_matches('\\'),
+                relative[relative_directory.len()..].trim_start_matches('\\'),
             );
             let metadata_kind = child
                 .file_type()
@@ -762,7 +762,7 @@ mod windows {
                 .ok_or_else(|| format!("Source tree contains an unapproved path: {relative}"))?;
             let child_path = append_path(
                 directory,
-                &relative[relative_directory.len()..].trim_start_matches('\\'),
+                relative[relative_directory.len()..].trim_start_matches('\\'),
             );
             let file_type = child
                 .file_type()
