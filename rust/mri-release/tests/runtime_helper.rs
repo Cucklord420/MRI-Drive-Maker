@@ -50,8 +50,14 @@ fn rehash_tampered_copy_worker(source: &Path, destination: &Path) {
         entries.push((name, bytes, compression, last_modified, permissions));
     }
 
-    assert!(helper_changed, "the runtime package must contain its copy worker");
-    assert!(manifest_found, "the runtime package must contain RELEASE.json");
+    assert!(
+        helper_changed,
+        "the runtime package must contain its copy worker"
+    );
+    assert!(
+        manifest_found,
+        "the runtime package must contain RELEASE.json"
+    );
 
     let mut helper_digest = None;
     for (name, bytes, _, _, _) in &entries {
