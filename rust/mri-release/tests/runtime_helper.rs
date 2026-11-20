@@ -8,7 +8,7 @@ use std::process::Command;
 use zip::ZipArchive;
 
 #[test]
-fn packaged_runtime_helper_captures_a_synthetic_source_snapshot() {
+fn packaged_copy_worker_captures_source_identity_without_an_external_snapshot() {
     let temp = tempfile::tempdir().expect("owned synthetic fixture");
     let source = temp.path().join("source");
     fs::create_dir_all(source.join("nested")).unwrap();
@@ -50,26 +50,13 @@ fn packaged_runtime_helper_captures_a_synthetic_source_snapshot() {
 
     package.extract(temp.path()).unwrap();
     let helper = temp.path().join("MRI-Drive-Maker-v0.3.0/App/mri-copy.exe");
-    let snapshot = temp.path().join("source-identity.json");
-    let captured = Command::new(&helper)
-        .arg("--snapshot")
-        .arg(&source)
-        .arg(&snapshot)
+    let self_verification = Command::new(&helper)
+        .arg("--verify")
+        .arg(&archive)
         .output()
-        .expect("the packaged Rust helper must launch");
-    assert!(
-        captured.status.success(),
-        "packaged source snapshot failed: {}",
-        String::from_utf8_lossy(&captured.stderr)
-    );
-
-    let identity: serde_json::Value = serde_json::from_slice(&fs::read(snapshot).unwrap()).unwrap();
-    let entry = &identity["Entries"]["nested\\payload.bin"];
-    assert_eq!(entry["IsDirectory"], false);
-    assert_eq!(entry["Length"], 17);
-    let file_id = entry["Identity"]["FileId"].as_str().unwrap();
-    assert_eq!(file_id.len(), 32);
-    assert_ne!(file_id, "00000000000000000000000000000000");
+        .expect("the packaged copy worker must launch");
+    assert_eq!(self_verification.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&self_verification.stderr).contains("Usage: mri-copy"));
 
     let target = temp.path().join("target");
     fs::create_dir(&target).unwrap();
@@ -90,8 +77,7 @@ fn packaged_runtime_helper_captures_a_synthetic_source_snapshot() {
                     "Length": 17,
                     "Sha256": format!("{:x}", sha2::Sha256::digest(b"synthetic payload"))
                 }
-            ],
-            "SourceIdentity": identity
+            ]
         }
     });
     let plan_bytes = serde_json::to_vec(&plan).unwrap();

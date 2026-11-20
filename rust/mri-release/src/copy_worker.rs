@@ -3,39 +3,41 @@
 //! This module is limited to ordinary files and directories. It has no disk
 //! enumeration, formatting, erasing, mounting, or volume-preparation APIs.
 
-use serde::{Deserialize, Serialize};
+#[cfg(windows)]
+use serde::Deserialize;
 #[cfg(windows)]
 use sha2::Digest;
+#[cfg(windows)]
 use std::collections::BTreeMap;
 #[cfg(windows)]
 use std::collections::BTreeSet;
 use std::path::Path;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "PascalCase")]
+#[cfg(windows)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileIdentity {
     pub volume_serial: String,
     pub file_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "PascalCase")]
+#[cfg(windows)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotEntry {
     pub identity: FileIdentity,
     pub is_directory: bool,
     pub length: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "PascalCase")]
+#[cfg(windows)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AncestorIdentity {
     pub path: String,
     pub identity: FileIdentity,
     pub is_reparse_point: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "PascalCase")]
+#[cfg(windows)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceIdentitySnapshot {
     pub root_path: String,
     pub ancestors: Vec<AncestorIdentity>,
@@ -57,7 +59,6 @@ struct ManifestEntry {
 #[serde(rename_all = "PascalCase")]
 struct Manifest {
     entries: Vec<ManifestEntry>,
-    source_identity: Option<SourceIdentitySnapshot>,
 }
 
 #[cfg(windows)]
@@ -67,19 +68,6 @@ struct CopyPlan {
     source_root: String,
     target_root: String,
     manifest: Manifest,
-}
-
-pub fn write_snapshot(root: &Path, output: &Path) -> Result<(), String> {
-    let snapshot = capture_snapshot(root)?;
-    let bytes = serde_json::to_vec(&snapshot).map_err(|e| e.to_string())?;
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(output)
-        .map_err(|e| format!("Cannot create source identity snapshot: {e}"))?;
-    use std::io::Write;
-    file.write_all(&bytes)
-        .map_err(|e| format!("Cannot write source identity snapshot: {e}"))
 }
 
 pub fn copy_plan(plan_path: &Path, expected_hash: &str) -> Result<(), String> {
@@ -93,25 +81,18 @@ pub fn copy_plan(plan_path: &Path, expected_hash: &str) -> Result<(), String> {
         Err("The copy worker requires Windows".into())
     }
 }
-
 #[cfg(windows)]
 fn validate_copy_plan(
     plan_path: &Path,
     expected_hash: &str,
-) -> Result<(CopyPlan, SourceIdentitySnapshot), String> {
+) -> Result<CopyPlan, String> {
     let raw = std::fs::read(plan_path).map_err(|e| format!("Cannot read copy plan: {e}"))?;
     let actual_hash = format!("{:x}", sha2::Sha256::digest(&raw));
     if !is_sha256(expected_hash) || !actual_hash.eq_ignore_ascii_case(expected_hash) {
         return Err("Runtime data changed or is corrupt. No copy is allowed.".into());
     }
     let plan: CopyPlan = serde_json::from_slice(&raw).map_err(|_| "Invalid copy plan JSON")?;
-    let snapshot = plan
-        .manifest
-        .source_identity
-        .clone()
-        .ok_or("Copy plan has no source identity snapshot")?;
-    validate_manifest(&plan.manifest.entries, &snapshot)?;
-    Ok((plan, snapshot))
+    Ok(plan)
 }
 
 #[cfg(windows)]
@@ -1083,12 +1064,10 @@ mod windows {
             .eq_ignore_ascii_case(right.trim_end_matches('\\'))
     }
 
-    pub(super) fn capture_snapshot_inner(root: &Path) -> Result<SourceIdentitySnapshot, String> {
-        capture_snapshot_impl(root)
-    }
-
     pub(super) fn copy_plan_inner(plan_path: &Path, expected_hash: &str) -> Result<(), String> {
-        let (plan, snapshot) = validate_copy_plan(plan_path, expected_hash)?;
+        let plan = validate_copy_plan(plan_path, expected_hash)?;
+        let snapshot = capture_snapshot_impl(Path::new(&plan.source_root))?;
+        validate_manifest(&plan.manifest.entries, &snapshot)?;
         let prepared = prepare_source_impl(
             Path::new(&plan.source_root),
             &plan.manifest.entries,
@@ -1144,7 +1123,6 @@ mod windows {
             source: &Path,
             target: &Path,
             entries: &[ManifestEntry],
-            snapshot: &SourceIdentitySnapshot,
         ) -> (PathBuf, String) {
             let entries: Vec<_> = entries
                 .iter()
@@ -1161,8 +1139,7 @@ mod windows {
                 "SourceRoot": source,
                 "TargetRoot": target,
                 "Manifest": {
-                    "Entries": entries,
-                    "SourceIdentity": snapshot
+                    "Entries": entries
                 }
             });
             let bytes = serde_json::to_vec(&plan).unwrap();
@@ -1170,6 +1147,19 @@ mod windows {
             let path = temp.path().join("copy-plan.json");
             fs::write(&path, bytes).unwrap();
             (path, hash)
+        }
+
+        #[test]
+        fn copy_plan_captures_and_checks_source_identity_in_rust() {
+            let (_temp, source, target) = fixture();
+            let snapshot = capture_snapshot_impl(&source).unwrap();
+            let manifest = manifest_from_snapshot(&snapshot);
+            let (plan_path, expected_hash) =
+                authenticated_copy_plan(&_temp, &source, &target, &manifest);
+
+            let error = copy_plan_inner(&plan_path, &expected_hash).unwrap_err();
+            assert!(error.contains("volume GUID root"), "{error}");
+            assert_eq!(fs::read_dir(&target).unwrap().count(), 0);
         }
 
         #[test]
@@ -1288,7 +1278,7 @@ mod windows {
             let snapshot = capture_snapshot_impl(&source).unwrap();
             let manifest = manifest_from_snapshot(&snapshot);
             let (plan_path, expected_hash) =
-                authenticated_copy_plan(&_temp, &source, &target, &manifest, &snapshot);
+                authenticated_copy_plan(&_temp, &source, &target, &manifest);
             let original = source.join("nested\\payload.bin");
             let backup = _temp.path().join("payload.original");
             let alternate = _temp.path().join("alternate.bin");
@@ -1306,7 +1296,7 @@ mod windows {
             let snapshot = capture_snapshot_impl(&source).unwrap();
             let manifest = manifest_from_snapshot(&snapshot);
             let (plan_path, expected_hash) =
-                authenticated_copy_plan(&_temp, &source, &target, &manifest, &snapshot);
+                authenticated_copy_plan(&_temp, &source, &target, &manifest);
             let original = source.join("nested");
             let moved = _temp.path().join("nested.original");
             let alternate = _temp.path().join("alternate");
@@ -1325,7 +1315,7 @@ mod windows {
             let snapshot = capture_snapshot_impl(&source).unwrap();
             let manifest = manifest_from_snapshot(&snapshot);
             let (plan_path, expected_hash) =
-                authenticated_copy_plan(&_temp, &source, &target, &manifest, &snapshot);
+                authenticated_copy_plan(&_temp, &source, &target, &manifest);
             let original = source.join("nested");
             let moved = _temp.path().join("nested.original");
             fs::rename(&original, &moved).unwrap();
@@ -1342,7 +1332,7 @@ mod windows {
             let snapshot = capture_snapshot_impl(&source).unwrap();
             let manifest = manifest_from_snapshot(&snapshot);
             let (plan_path, expected_hash) =
-                authenticated_copy_plan(&_temp, &source, &target, &manifest, &snapshot);
+                authenticated_copy_plan(&_temp, &source, &target, &manifest);
             let original = source.join("nested\\payload.bin");
             let moved = _temp.path().join("payload.original");
             fs::rename(&original, &moved).unwrap();
@@ -1383,14 +1373,4 @@ mod windows {
             assert_eq!(fs::read_dir(&target).unwrap().count(), 0);
         }
     }
-}
-
-#[cfg(windows)]
-pub fn capture_snapshot(root: &Path) -> Result<SourceIdentitySnapshot, String> {
-    windows::capture_snapshot_inner(root)
-}
-
-#[cfg(not(windows))]
-pub fn capture_snapshot(_root: &Path) -> Result<SourceIdentitySnapshot, String> {
-    Err("Source identity capture requires Windows".into())
 }

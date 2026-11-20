@@ -192,7 +192,7 @@ function Watch-Media {
         Assert-MRISourceSeparation $opened $PSScriptRoot
         [void][IO.Directory]::CreateDirectory($run)
         Write-Host 'Reading the source once and hashing every file. This can take a few minutes.'
-        $manifest=Get-MRIManifest $cfg.SourcePath -CaptureSourceIdentity
+        $manifest=Get-MRIManifest $cfg.SourcePath
         if (-not @($manifest.Entries | Where-Object { -not $_.IsDirectory }).Count) { throw 'MRI source contains no files.' }
         if (@($manifest.Entries | Where-Object { $_.Length -gt 4294967295 }).Count) { throw 'A source file exceeds the FAT32 file-size limit.' }
         foreach ($mutable in @($cfg.MutableFiles)) {

@@ -22,7 +22,7 @@ try {
     try { $stream.SetLength(32MB) } finally { $stream.Dispose() }
     $cfg=Read-MRIJson (Join-Path $root 'mri-config.example.json')
     $cfg.SourcePath=$source; $cfg.SourceKind='Folder'; $cfg.PrepareDisk=$true; $cfg.MinimumDiskBytes=1
-    $manifest=Get-MRIManifest $source -CaptureSourceIdentity
+    $manifest=Get-MRIManifest $source
     foreach ($i in 1..4) {
         $image=Join-Path $temp ('owned-'+$i+'.vhd')
         $diskpart=Join-Path $temp ('create-'+$i+'.txt')

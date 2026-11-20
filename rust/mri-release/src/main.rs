@@ -12,7 +12,6 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use zip::{write::SimpleFileOptions, CompressionMethod, DateTime, ZipArchive, ZipWriter};
-mod copy_worker;
 
 #[cfg(test)]
 thread_local! {
@@ -323,7 +322,41 @@ fn canonical_member_name(name: &str) -> Result<(String, String), String> {
     Ok((captures[1].to_owned(), name.to_ascii_lowercase()))
 }
 fn verify(repo: &Path, archive_path: &Path) -> Result<Manifest, String> {
-    verify_with_environment(repo, archive_path, &process_environment())
+    let trusted_helper = read_trusted_sibling_runtime_helper()?;
+    verify_with_environment_and_helper(
+        repo,
+        archive_path,
+        &process_environment(),
+        trusted_helper.as_deref(),
+    )
+}
+
+fn read_trusted_sibling_runtime_helper() -> Result<Option<Vec<u8>>, String> {
+    let executable = std::env::current_exe()
+        .map_err(|error| format!("Cannot resolve trusted release verifier: {error}"))?;
+    let executable = fs::canonicalize(executable)
+        .map_err(|error| format!("Cannot resolve the release verifier's real path: {error}"))?;
+    let directory = executable
+        .parent()
+        .ok_or("The release verifier has no parent directory")?;
+    let helper_path = directory.join("mri-copy.exe");
+    let metadata = match fs::symlink_metadata(&helper_path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("Cannot inspect trusted Rust copy helper: {error}")),
+    };
+    if !metadata.file_type().is_file() || metadata.len() > DEFAULT_RESOURCE_LIMITS.max_member_bytes
+    {
+        return Err("Trusted Rust copy helper must be a bounded regular file".into());
+    }
+    let helper = fs::read(&helper_path)
+        .map_err(|error| format!("Cannot read trusted Rust copy helper: {error}"))?;
+    let helper_length = u64::try_from(helper.len()).map_err(|_| "Trusted helper size overflow")?;
+    if helper_length != metadata.len() {
+        return Err("Trusted Rust copy helper changed while being read".into());
+    }
+    validate_runtime_helper(&helper)?;
+    Ok(Some(helper))
 }
 
 #[derive(Clone, Copy)]
@@ -821,19 +854,46 @@ fn stream_member<R: Read>(
     ))
 }
 
+#[cfg(test)]
 fn verify_with_environment(
     repo: &Path,
     archive_path: &Path,
     environment: &[(OsString, OsString)],
 ) -> Result<Manifest, String> {
-    verify_with_limits(repo, archive_path, environment, DEFAULT_RESOURCE_LIMITS)
+    verify_with_environment_and_helper(repo, archive_path, environment, None)
 }
 
+fn verify_with_environment_and_helper(
+    repo: &Path,
+    archive_path: &Path,
+    environment: &[(OsString, OsString)],
+    trusted_helper: Option<&[u8]>,
+) -> Result<Manifest, String> {
+    verify_with_limits_and_helper(
+        repo,
+        archive_path,
+        environment,
+        DEFAULT_RESOURCE_LIMITS,
+        trusted_helper,
+    )
+}
+
+#[cfg(test)]
 fn verify_with_limits(
     repo: &Path,
     archive_path: &Path,
     environment: &[(OsString, OsString)],
     limits: ResourceLimits,
+) -> Result<Manifest, String> {
+    verify_with_limits_and_helper(repo, archive_path, environment, limits, None)
+}
+
+fn verify_with_limits_and_helper(
+    repo: &Path,
+    archive_path: &Path,
+    environment: &[(OsString, OsString)],
+    limits: ResourceLimits,
+    trusted_helper: Option<&[u8]>,
 ) -> Result<Manifest, String> {
     assert_git_identity(repo, environment)?;
     let mut file = File::open(archive_path).map_err(|e| e.to_string())?;
@@ -1002,7 +1062,7 @@ fn verify_with_limits(
     for (name, sources) in &manifest.generated_files {
         if name != "App/mri-copy.exe"
             || sources.len() != 2
-            || sources[0] != "rust/mri-release/src/main.rs"
+            || sources[0] != "rust/mri-release/src/bin/mri-copy.rs"
             || sources[1] != "rust/mri-release/src/copy_worker.rs"
         {
             return Err(format!(
@@ -1014,6 +1074,19 @@ fn verify_with_limits(
             .ok_or("Missing generated package file")?;
         if verified.sha256 != manifest.sha256[name] {
             return Err(format!("Generated package file SHA-256 mismatch: {name}"));
+        }
+        let trusted_helper = trusted_helper.ok_or(
+            "Runtime package verification requires the trusted sibling mri-copy.exe",
+        )?;
+        validate_runtime_helper(trusted_helper)?;
+        let trusted_helper_length =
+            u64::try_from(trusted_helper.len()).map_err(|_| "Trusted helper size overflow")?;
+        if verified.expanded_bytes != trusted_helper_length
+            || verified.sha256 != digest(trusted_helper)
+        {
+            return Err(
+                "Packaged runtime helper differs from the trusted sibling mri-copy.exe".into(),
+            );
         }
         for source in sources {
             let source_size = committed_size_with_environment(
@@ -1287,7 +1360,7 @@ fn build_with_environment_and_helper(
         generated_files.insert(
             name,
             vec![
-                "rust/mri-release/src/main.rs".to_owned(),
+                "rust/mri-release/src/bin/mri-copy.rs".to_owned(),
                 "rust/mri-release/src/copy_worker.rs".to_owned(),
             ],
         );
@@ -1353,7 +1426,12 @@ fn build_with_environment_and_helper(
             if release_test_failure_requested(environment, "verify") {
                 return Err("injected verification failure".into());
             }
-            let checked = verify_with_environment(repo, staged_path, environment)?;
+            let checked = verify_with_environment_and_helper(
+                repo,
+                staged_path,
+                environment,
+                runtime_helper,
+            )?;
             #[cfg(test)]
             let checked = if release_test_failure_requested(environment, "manifest-mismatch") {
                 let mut mismatched = checked;
@@ -1382,9 +1460,8 @@ fn build_runtime_package(repo: &Path, path: &Path, version: &str) -> Result<Mani
         return Err("Runtime packages must be built on Windows with the Rust copy worker".into());
     }
     let sources = package_sources(repo)?;
-    let executable =
-        std::env::current_exe().map_err(|e| format!("Cannot resolve release helper: {e}"))?;
-    let helper = fs::read(&executable).map_err(|e| format!("Cannot read release helper: {e}"))?;
+    let helper = read_trusted_sibling_runtime_helper()?
+        .ok_or("Build the separate Rust mri-copy.exe helper before packaging")?;
     build_with_environment_and_helper(
         repo,
         path,
@@ -1395,42 +1472,6 @@ fn build_runtime_package(repo: &Path, path: &Path, version: &str) -> Result<Mani
     )
 }
 fn main() {
-    let raw_args: Vec<OsString> = std::env::args_os().skip(1).collect();
-    if raw_args
-        .first()
-        .and_then(|arg| arg.to_str())
-        .is_some_and(|arg| arg == "--snapshot")
-    {
-        if raw_args.len() != 3 {
-            eprintln!("Usage: mri-copy --snapshot SOURCE_ROOT OUTPUT_JSON");
-            std::process::exit(2);
-        }
-        let result = copy_worker::write_snapshot(Path::new(&raw_args[1]), Path::new(&raw_args[2]));
-        if let Err(reason) = result {
-            eprintln!("{reason}");
-            std::process::exit(1);
-        }
-        return;
-    }
-    if raw_args
-        .first()
-        .and_then(|arg| arg.to_str())
-        .is_some_and(|arg| arg == "--copy")
-    {
-        if raw_args.len() != 3 {
-            eprintln!("Usage: mri-copy --copy PLAN_JSON EXPECTED_SHA256");
-            std::process::exit(2);
-        }
-        let Some(expected_hash) = raw_args[2].to_str() else {
-            eprintln!("Expected plan hash must be ASCII hexadecimal");
-            std::process::exit(2);
-        };
-        if let Err(reason) = copy_worker::copy_plan(Path::new(&raw_args[1]), expected_hash) {
-            eprintln!("{reason}");
-            std::process::exit(1);
-        }
-        return;
-    }
     let mut version = "0.3.0".to_owned();
     let mut output: Option<PathBuf> = None;
     let mut verify_path: Option<PathBuf> = None;

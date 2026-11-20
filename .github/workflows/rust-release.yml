@@ -61,10 +61,17 @@ jobs:
         run: |
           cargo clippy --locked --manifest-path rust/mri-release/Cargo.toml --all-targets -- -D warnings
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build both Rust release tools in debug mode
+        shell: pwsh
+        run: |
+          cargo build --locked --manifest-path rust/mri-release/Cargo.toml --bins
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Run Rust release integrity tests in debug and release profiles
         shell: pwsh
         run: |
           cargo test --locked --manifest-path rust/mri-release/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo build --release --locked --manifest-path rust/mri-release/Cargo.toml --bins
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --release --locked --manifest-path rust/mri-release/Cargo.toml
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -112,6 +119,8 @@ jobs:
         run: |
           $actualHead = (git rev-parse HEAD).Trim()
           if ($LASTEXITCODE -ne 0 -or $actualHead -ne $env:GITHUB_SHA) { throw 'Checkout does not match the merged release commit.' }
+          cargo build --release --locked --manifest-path rust/mri-release/Cargo.toml --bins
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $archive = Join-Path $env:RUNNER_TEMP 'MRI-Drive-Maker-v0.3.2.zip'
           cargo run --release --locked --manifest-path rust/mri-release/Cargo.toml -- --version 0.3.2 --output $archive
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

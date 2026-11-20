@@ -106,7 +106,7 @@ public static class MRIStorageSmokeIsoWriter {
     $runtime.SourcePath=$opened.Path; $runtime.SourceKind='Folder'
     $runtime | Add-Member -NotePropertyName RecipeIdentity -NotePropertyValue (ConvertTo-Json $cfg -Depth 6 -Compress)
     $runtime | Add-Member -NotePropertyName InputStamp -NotePropertyValue $opened.Stamp
-    $manifest=Get-MRIManifest $opened.Path -CaptureSourceIdentity
+    $manifest=Get-MRIManifest $opened.Path
     $state=Join-Path $temp 'state.json'; $receipt=Join-Path $temp 'receipt.json'; $work=Join-Path $temp 'Work'; $cancel=Join-Path $temp 'cancel'
     $fixturePartitions=@(Get-Partition -DiskNumber $disk.Number -ErrorAction Stop)
     if ($fixturePartitions.Count -ne 1 -or [string]$fixturePartitions[0].Type -ne 'Basic') {

@@ -834,8 +834,12 @@ fn generated_copy_worker_is_declared_with_committed_rust_origins_and_hash_checke
         "@echo synthetic\r\n",
         &environment,
     );
-    fs::create_dir_all(repo.join("rust/mri-release/src")).unwrap();
-    fs::write(repo.join("rust/mri-release/src/main.rs"), "fn main() {}\n").unwrap();
+    fs::create_dir_all(repo.join("rust/mri-release/src/bin")).unwrap();
+    fs::write(
+        repo.join("rust/mri-release/src/bin/mri-copy.rs"),
+        "fn main() {}\n",
+    )
+    .unwrap();
     fs::write(
         repo.join("rust/mri-release/src/copy_worker.rs"),
         "pub fn copy() {}\n",
@@ -845,7 +849,7 @@ fn generated_copy_worker_is_declared_with_committed_rust_origins_and_hash_checke
         &repo,
         &[
             "add",
-            "rust/mri-release/src/main.rs",
+            "rust/mri-release/src/bin/mri-copy.rs",
             "rust/mri-release/src/copy_worker.rs",
         ],
         &environment,
@@ -875,11 +879,12 @@ fn generated_copy_worker_is_declared_with_committed_rust_origins_and_hash_checke
     assert_eq!(
         manifest.generated_files["App/mri-copy.exe"],
         [
-            "rust/mri-release/src/main.rs".to_owned(),
+            "rust/mri-release/src/bin/mri-copy.rs".to_owned(),
             "rust/mri-release/src/copy_worker.rs".to_owned()
         ]
     );
-    let verified = verify_with_environment(&repo, &archive, &environment).unwrap();
+    let verified = verify_with_environment_and_helper(&repo, &archive, &environment, Some(&helper))
+        .unwrap();
     assert_eq!(verified, manifest);
     let packaged = members(&archive);
     let helper_member = "MRI-Drive-Maker-v0.3.0/App/mri-copy.exe";
@@ -887,6 +892,30 @@ fn generated_copy_worker_is_declared_with_committed_rust_origins_and_hash_checke
 
     corrupt_member_payload(&archive, "/App/mri-copy.exe");
     assert!(verify_with_environment(&repo, &archive, &environment).is_err());
+
+    let replaced_archive = temp.path().join("replaced-helper.zip");
+    let mut replaced_helper = helper.clone();
+    replaced_helper[127] ^= 0x5a;
+    build_with_environment_and_helper(
+        &repo,
+        &replaced_archive,
+        "0.3.0",
+        &synthetic_sources(),
+        &environment,
+        Some(&replaced_helper),
+    )
+    .unwrap();
+    let error = verify_with_environment_and_helper(
+        &repo,
+        &replaced_archive,
+        &environment,
+        Some(&helper),
+    )
+    .unwrap_err();
+    assert!(
+        error.contains("trusted sibling mri-copy.exe"),
+        "unexpected verification failure: {error}"
+    );
 }
 
 #[test]

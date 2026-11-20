@@ -674,58 +674,18 @@ function Get-MRIWorkerExecutable {
         if ([IO.File]::Exists((Join-Path $parent 'rust/mri-release/Cargo.toml'))) { $repo=$parent }
     }
     if ($repo) {
-        $candidates.Add((Join-Path $repo 'rust/mri-release/target/debug/mri-release.exe'))
-        $candidates.Add((Join-Path $repo 'rust/mri-release/target/release/mri-release.exe'))
+        $candidates.Add((Join-Path $repo 'rust/mri-release/target/debug/mri-copy.exe'))
+        $candidates.Add((Join-Path $repo 'rust/mri-release/target/release/mri-copy.exe'))
     }
     foreach ($candidate in $candidates) { if ([IO.File]::Exists($candidate)) { return $candidate } }
     throw 'The Rust source-copy worker is unavailable. No source copy is allowed.'
 }
-function Get-MRISourceIdentitySnapshot {
-    param([string]$Root,[scriptblock]$Guard)
-    Initialize-MRINative
-    $temporaryRoot=[IO.Path]::GetTempPath()
-    $fullRoot=[IO.Path]::GetFullPath($Root)
-    $rootForCheck=$fullRoot.TrimEnd([char[]]@('\','/'))
-    $tempForCheck=[IO.Path]::GetFullPath($temporaryRoot).TrimEnd([char[]]@('\','/'))
-    if ($tempForCheck.Equals($rootForCheck,[StringComparison]::OrdinalIgnoreCase) -or
-        $tempForCheck.StartsWith(($rootForCheck+'\'),[StringComparison]::OrdinalIgnoreCase)) {
-        $volumeRoot=[IO.Path]::GetPathRoot($fullRoot)
-        if ($rootForCheck.Equals($volumeRoot.TrimEnd([char[]]@('\','/')),[StringComparison]::OrdinalIgnoreCase)) {
-            throw 'Cannot safely stage source identity data outside the selected volume root.'
-        }
-        $temporaryRoot=[IO.Path]::GetDirectoryName($rootForCheck)
-        if ([string]::IsNullOrWhiteSpace($temporaryRoot)) { throw 'Cannot find a staging directory outside the source tree.' }
-    }
-    $token=[guid]::NewGuid().ToString('N')
-    $snapshotPath=Join-Path $temporaryRoot ('mri-source-identity-'+$token+'.json')
-    $logPath=Join-Path $temporaryRoot ('mri-source-identity-'+$token+'.log')
-    $runner=$Guard
-    if ($null -eq $runner) { $runner={ } }
-    try {
-        $worker=Get-MRIWorkerExecutable
-        $arguments=@('--snapshot',$Root,$snapshotPath)
-        $line=($arguments | ForEach-Object { [MRIBatch.NativeProcess]::Quote([string]$_) }) -join ' '
-        $code=Invoke-MRICommand $worker $line $temporaryRoot $logPath 3600 $runner
-        if ($code -ne 0) {
-            $detail=''
-            if ([IO.File]::Exists($logPath)) { $detail=[IO.File]::ReadAllText($logPath) }
-            throw "Rust source identity capture failed (exit $code). $detail"
-        }
-        return Read-MRIJson $snapshotPath
-    } finally {
-        if ([IO.File]::Exists($snapshotPath)) { [IO.File]::Delete($snapshotPath) }
-        if ([IO.File]::Exists($logPath)) { [IO.File]::Delete($logPath) }
-    }
-}
 function Get-MRIManifest {
-    param([string]$Root, [switch]$IgnoreSystemDirectories, [switch]$NoHash, [switch]$CaptureSourceIdentity, [scriptblock]$Guard)
+    param([string]$Root, [switch]$IgnoreSystemDirectories, [switch]$NoHash, [scriptblock]$Guard)
     $base=[IO.Path]::GetFullPath($Root).TrimEnd([char[]]@('\','/')) + [IO.Path]::DirectorySeparatorChar
     Assert-MRIPlainDirectory $base
     $rootItem=Get-Item -LiteralPath $base -Force -ErrorAction Stop
     if (-not $rootItem.PSIsContainer -or ($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Source/target root must be a real directory, not a link.' }
-    if ($CaptureSourceIdentity -and $NoHash) { throw 'A copy source identity requires a content-hashed manifest.' }
-    $identityBefore=$null
-    if ($CaptureSourceIdentity) { $identityBefore=Get-MRISourceIdentitySnapshot $Root $Guard }
     $stack=[Collections.Generic.Stack[string]]::new(); $stack.Push($base)
     $entries=[Collections.Generic.List[object]]::new(); $names=@{}
     $clock=[Diagnostics.Stopwatch]::StartNew()
@@ -755,17 +715,7 @@ function Get-MRIManifest {
     }
     $sorted=@($entries | Sort-Object RelativePath)
     $total=[long]0; foreach ($e in $sorted) { $total+=$e.Length }
-    $result=[pscustomobject]@{ Entries=$sorted; TotalBytes=$total; Digest=(Get-MRIHash (ConvertTo-Json -InputObject $sorted -Compress -Depth 5)) }
-    if ($CaptureSourceIdentity) {
-        $identityAfter=Get-MRISourceIdentitySnapshot $Root $Guard
-        $beforeJson=ConvertTo-Json -InputObject $identityBefore -Compress -Depth 30
-        $afterJson=ConvertTo-Json -InputObject $identityAfter -Compress -Depth 30
-        if ((Get-MRIHash $beforeJson) -ne (Get-MRIHash $afterJson)) {
-            throw 'Source ancestry or entries changed during manifest creation. No drive was modified.'
-        }
-        $result | Add-Member -NotePropertyName SourceIdentity -NotePropertyValue $identityAfter
-    }
-    return $result
+    [pscustomobject]@{ Entries=$sorted; TotalBytes=$total; Digest=(Get-MRIHash (ConvertTo-Json -InputObject $sorted -Compress -Depth 5)) }
 }
 function Assert-MRIManifest {
     param($Expected, [string]$Root, [string[]]$MutableFiles=@(), [scriptblock]$Guard)

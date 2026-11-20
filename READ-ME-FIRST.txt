@@ -3,8 +3,9 @@ Right-click it and choose Run as administrator.
 
 For a source archive from Code > Download ZIP, run this command from its
 extracted root before launching: cargo build --locked --manifest-path
-rust/mri-release/Cargo.toml. The Rust copy helper is required; copying stops
-safely if it is missing. Versioned release ZIPs already include the helper.
+rust/mri-release/Cargo.toml --bins. This builds the separate Rust release tool and
+copy helper. The Rust copy helper is required; copying stops safely if it is
+missing. Versioned release ZIPs already include the helper.
 
 If Windows blocks the downloaded script before the menu opens:
 Only for a verified, trusted GitHub download, right-click the original ZIP,
