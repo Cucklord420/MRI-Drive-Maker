@@ -32,7 +32,10 @@ fn rehash_tampered_copy_worker(source: &Path, destination: &Path) {
 
     for index in 0..archive.len() {
         let mut member = archive.by_index(index).unwrap();
-        let name = member.name().expect("synthetic ZIP member name").into_owned();
+        let name = member
+            .name()
+            .expect("synthetic ZIP member name")
+            .into_owned();
         let compression = member.compression();
         let last_modified = member
             .last_modified()
