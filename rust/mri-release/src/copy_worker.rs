@@ -82,10 +82,7 @@ pub fn copy_plan(plan_path: &Path, expected_hash: &str) -> Result<(), String> {
     }
 }
 #[cfg(windows)]
-fn validate_copy_plan(
-    plan_path: &Path,
-    expected_hash: &str,
-) -> Result<CopyPlan, String> {
+fn validate_copy_plan(plan_path: &Path, expected_hash: &str) -> Result<CopyPlan, String> {
     let raw = std::fs::read(plan_path).map_err(|e| format!("Cannot read copy plan: {e}"))?;
     let actual_hash = format!("{:x}", sha2::Sha256::digest(&raw));
     if !is_sha256(expected_hash) || !actual_hash.eq_ignore_ascii_case(expected_hash) {

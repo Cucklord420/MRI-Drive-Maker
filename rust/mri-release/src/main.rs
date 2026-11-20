@@ -1075,9 +1075,8 @@ fn verify_with_limits_and_helper(
         if verified.sha256 != manifest.sha256[name] {
             return Err(format!("Generated package file SHA-256 mismatch: {name}"));
         }
-        let trusted_helper = trusted_helper.ok_or(
-            "Runtime package verification requires the trusted sibling mri-copy.exe",
-        )?;
+        let trusted_helper = trusted_helper
+            .ok_or("Runtime package verification requires the trusted sibling mri-copy.exe")?;
         validate_runtime_helper(trusted_helper)?;
         let trusted_helper_length =
             u64::try_from(trusted_helper.len()).map_err(|_| "Trusted helper size overflow")?;
@@ -1426,12 +1425,8 @@ fn build_with_environment_and_helper(
             if release_test_failure_requested(environment, "verify") {
                 return Err("injected verification failure".into());
             }
-            let checked = verify_with_environment_and_helper(
-                repo,
-                staged_path,
-                environment,
-                runtime_helper,
-            )?;
+            let checked =
+                verify_with_environment_and_helper(repo, staged_path, environment, runtime_helper)?;
             #[cfg(test)]
             let checked = if release_test_failure_requested(environment, "manifest-mismatch") {
                 let mut mismatched = checked;

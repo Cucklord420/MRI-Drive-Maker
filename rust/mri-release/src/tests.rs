@@ -883,8 +883,8 @@ fn generated_copy_worker_is_declared_with_committed_rust_origins_and_hash_checke
             "rust/mri-release/src/copy_worker.rs".to_owned()
         ]
     );
-    let verified = verify_with_environment_and_helper(&repo, &archive, &environment, Some(&helper))
-        .unwrap();
+    let verified =
+        verify_with_environment_and_helper(&repo, &archive, &environment, Some(&helper)).unwrap();
     assert_eq!(verified, manifest);
     let packaged = members(&archive);
     let helper_member = "MRI-Drive-Maker-v0.3.0/App/mri-copy.exe";
@@ -905,13 +905,9 @@ fn generated_copy_worker_is_declared_with_committed_rust_origins_and_hash_checke
         Some(&replaced_helper),
     )
     .unwrap();
-    let error = verify_with_environment_and_helper(
-        &repo,
-        &replaced_archive,
-        &environment,
-        Some(&helper),
-    )
-    .unwrap_err();
+    let error =
+        verify_with_environment_and_helper(&repo, &replaced_archive, &environment, Some(&helper))
+            .unwrap_err();
     assert!(
         error.contains("trusted sibling mri-copy.exe"),
         "unexpected verification failure: {error}"
