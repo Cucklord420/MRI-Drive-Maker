@@ -33,7 +33,7 @@ Existing command-line actions and optional setup-batch recipes remain available.
 
 ## Rust source-release generator
 
-The runnable candidate download is generated and verified by Rust on Windows directly from the pinned Git revision. Build the `mri-copy` executable first, then build `mri-release`; the verifier embeds the helper's SHA-256 and checks both the trusted sibling and packaged helper against that build-time value. The packaged copy worker cannot verify release archives. Keep both executables from the same trusted checkout. `--source-only` exists for cross-platform packaging tests and omits the runtime helper; it does not produce a runnable download.
+The runnable candidate download is generated and verified by Rust on Windows directly from the pinned Git revision. Build the `mri-copy` executable first, then build `mri-release`; the verifier embeds the exact helper bytes and their SHA-256, then checks the packaged helper against those embedded bytes. Verification does not depend on a mutable neighboring executable. The packaged copy worker cannot verify release archives. Keep both executables from the same trusted checkout. `--source-only` exists for cross-platform packaging tests and omits the runtime helper; it does not produce a runnable download.
 
 ```text
 cargo build --locked --manifest-path rust/mri-release/Cargo.toml --bin mri-copy

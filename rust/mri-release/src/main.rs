@@ -14,6 +14,8 @@ use std::process::Command;
 use zip::{write::SimpleFileOptions, CompressionMethod, DateTime, ZipArchive, ZipWriter};
 
 const TRUSTED_COPY_HELPER_SHA256: Option<&str> = option_env!("MRI_COPY_SHA256");
+const TRUSTED_COPY_HELPER_BYTES: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/trusted_copy_helper.bin"));
 
 #[cfg(test)]
 thread_local! {
@@ -84,6 +86,13 @@ fn validate_trusted_runtime_helper(
         return Err("Rust copy worker differs from the verifier's build-time SHA-256".into());
     }
     Ok(())
+}
+fn embedded_trusted_runtime_helper() -> Result<Option<&'static [u8]>, String> {
+    let Some(expected_sha256) = TRUSTED_COPY_HELPER_SHA256 else {
+        return Ok(None);
+    };
+    validate_trusted_runtime_helper(TRUSTED_COPY_HELPER_BYTES, Some(expected_sha256))?;
+    Ok(Some(TRUSTED_COPY_HELPER_BYTES))
 }
 fn is_git_environment_key(key: &OsStr) -> bool {
     key.to_string_lossy()
@@ -336,43 +345,15 @@ fn canonical_member_name(name: &str) -> Result<(String, String), String> {
     Ok((captures[1].to_owned(), name.to_ascii_lowercase()))
 }
 fn verify(repo: &Path, archive_path: &Path) -> Result<Manifest, String> {
-    let trusted_helper = read_trusted_sibling_runtime_helper()?;
+    let trusted_helper = embedded_trusted_runtime_helper()?;
     verify_with_limits_and_helper(
         repo,
         archive_path,
         &process_environment(),
         DEFAULT_RESOURCE_LIMITS,
-        trusted_helper.as_deref(),
+        trusted_helper,
         TRUSTED_COPY_HELPER_SHA256,
     )
-}
-
-fn read_trusted_sibling_runtime_helper() -> Result<Option<Vec<u8>>, String> {
-    let executable = std::env::current_exe()
-        .map_err(|error| format!("Cannot resolve trusted release verifier: {error}"))?;
-    let executable = fs::canonicalize(executable)
-        .map_err(|error| format!("Cannot resolve the release verifier's real path: {error}"))?;
-    let directory = executable
-        .parent()
-        .ok_or("The release verifier has no parent directory")?;
-    let helper_path = directory.join("mri-copy.exe");
-    let metadata = match fs::symlink_metadata(&helper_path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(format!("Cannot inspect trusted Rust copy helper: {error}")),
-    };
-    if !metadata.file_type().is_file() || metadata.len() > DEFAULT_RESOURCE_LIMITS.max_member_bytes
-    {
-        return Err("Trusted Rust copy helper must be a bounded regular file".into());
-    }
-    let helper = fs::read(&helper_path)
-        .map_err(|error| format!("Cannot read trusted Rust copy helper: {error}"))?;
-    let helper_length = u64::try_from(helper.len()).map_err(|_| "Trusted helper size overflow")?;
-    if helper_length != metadata.len() {
-        return Err("Trusted Rust copy helper changed while being read".into());
-    }
-    validate_runtime_helper(&helper)?;
-    Ok(Some(helper))
 }
 
 #[derive(Clone, Copy)]
@@ -1094,8 +1075,9 @@ fn verify_with_limits_and_helper(
         if verified.sha256 != manifest.sha256[name] {
             return Err(format!("Generated package file SHA-256 mismatch: {name}"));
         }
-        let trusted_helper = trusted_helper
-            .ok_or("Runtime package verification requires the trusted sibling mri-copy.exe")?;
+        let trusted_helper = trusted_helper.ok_or(
+            "Runtime package verification requires the verifier's embedded Rust copy worker",
+        )?;
         validate_trusted_runtime_helper(trusted_helper, expected_helper_sha256)?;
         let trusted_helper_length =
             u64::try_from(trusted_helper.len()).map_err(|_| "Trusted helper size overflow")?;
@@ -1103,7 +1085,8 @@ fn verify_with_limits_and_helper(
             || verified.sha256 != digest(trusted_helper)
         {
             return Err(
-                "Packaged runtime helper differs from the trusted sibling mri-copy.exe".into(),
+                "Packaged runtime helper differs from the verifier's embedded trusted copy worker"
+                    .into(),
             );
         }
         for source in sources {
@@ -1474,16 +1457,15 @@ fn build_runtime_package(repo: &Path, path: &Path, version: &str) -> Result<Mani
         return Err("Runtime packages must be built on Windows with the Rust copy worker".into());
     }
     let sources = package_sources(repo)?;
-    let helper = read_trusted_sibling_runtime_helper()?
-        .ok_or("Build the separate Rust mri-copy.exe helper before packaging")?;
-    validate_trusted_runtime_helper(&helper, TRUSTED_COPY_HELPER_SHA256)?;
+    let helper = embedded_trusted_runtime_helper()?
+        .ok_or("Build Rust mri-copy.exe before the release verifier")?;
     build_with_environment_and_helper(
         repo,
         path,
         version,
         &sources,
         &process_environment(),
-        Some(&helper),
+        Some(helper),
     )
 }
 fn main() {

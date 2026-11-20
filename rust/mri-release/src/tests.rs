@@ -917,7 +917,7 @@ fn generated_copy_worker_is_declared_with_committed_rust_origins_and_hash_checke
         verify_with_environment_and_helper(&repo, &replaced_archive, &environment, Some(&helper))
             .unwrap_err();
     assert!(
-        error.contains("trusted sibling mri-copy.exe"),
+        error.contains("embedded trusted copy worker"),
         "unexpected verification failure: {error}"
     );
 }
