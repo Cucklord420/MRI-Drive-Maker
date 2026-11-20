@@ -32,9 +32,9 @@ fn rehash_tampered_copy_worker(source: &Path, destination: &Path) {
 
     for index in 0..archive.len() {
         let mut member = archive.by_index(index).unwrap();
-        let name = member.name().to_owned();
+        let name = member.name().expect("synthetic ZIP member name").to_owned();
         let compression = member.compression();
-        let last_modified = member.last_modified();
+        let last_modified = member.last_modified().expect("synthetic ZIP member timestamp");
         let permissions = member.unix_mode().unwrap_or(0o100644);
         let mut bytes = Vec::new();
         member.read_to_end(&mut bytes).unwrap();
