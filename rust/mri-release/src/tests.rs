@@ -867,6 +867,14 @@ fn generated_copy_worker_is_declared_with_committed_rust_origins_and_hash_checke
     helper[64..68].copy_from_slice(b"PE\0\0");
     helper[68..70].copy_from_slice(&0x8664_u16.to_le_bytes());
     helper[88..90].copy_from_slice(&0x020b_u16.to_le_bytes());
+    let trusted_helper_sha256 = digest(&helper);
+    validate_trusted_runtime_helper(&helper, Some(&trusted_helper_sha256)).unwrap();
+    let mut changed_helper = helper.clone();
+    changed_helper[127] ^= 0x5a;
+    assert!(
+        validate_trusted_runtime_helper(&changed_helper, Some(&trusted_helper_sha256)).is_err()
+    );
+    assert!(validate_trusted_runtime_helper(&helper, None).is_err());
     let manifest = build_with_environment_and_helper(
         &repo,
         &archive,

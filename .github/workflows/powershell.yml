@@ -40,11 +40,12 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - name: Build the Rust release tool and copy helper for source smoke tests
+      - name: Build the Rust copy helper for source smoke tests
         shell: powershell
-        run: |
-          cargo build --locked --manifest-path rust/mri-release/Cargo.toml --bins
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        run: cargo build --locked --manifest-path rust/mri-release/Cargo.toml --bin mri-copy
+      - name: Build the release verifier with the Rust copy-helper digest
+        shell: powershell
+        run: cargo build --locked --manifest-path rust/mri-release/Cargo.toml --bin mri-release
       - name: Test Windows PowerShell launcher, menus, and simulated builds
         shell: powershell
         run: |

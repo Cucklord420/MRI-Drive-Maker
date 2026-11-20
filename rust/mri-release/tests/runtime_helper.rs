@@ -4,6 +4,7 @@ use sha2::Digest;
 use std::fs;
 use std::fs::File;
 use std::io::Read;
+use std::path::Path;
 use std::process::Command;
 use zip::ZipArchive;
 
@@ -37,6 +38,27 @@ fn packaged_copy_worker_captures_source_identity_without_an_external_snapshot() 
         "runtime package verification failed: {}",
         String::from_utf8_lossy(&verified.stderr)
     );
+
+    let verifier_copy_dir = temp.path().join("verifier-copy");
+    fs::create_dir(&verifier_copy_dir).unwrap();
+    let verifier_copy = verifier_copy_dir.join("mri-release.exe");
+    fs::copy(release_binary, &verifier_copy).unwrap();
+    let helper_path = Path::new(release_binary)
+        .parent()
+        .unwrap()
+        .join("mri-copy.exe");
+    let helper_copy = verifier_copy_dir.join("mri-copy.exe");
+    let mut helper_bytes = fs::read(helper_path).unwrap();
+    assert!(helper_bytes.len() > 127);
+    helper_bytes[127] ^= 0x5a;
+    fs::write(helper_copy, helper_bytes).unwrap();
+    let rejected_helper = Command::new(verifier_copy)
+        .arg("--verify")
+        .arg(&archive)
+        .output()
+        .expect("the copied release verifier must launch");
+    assert!(!rejected_helper.status.success());
+    assert!(String::from_utf8_lossy(&rejected_helper.stderr).contains("build-time SHA-256"));
 
     let mut package = ZipArchive::new(File::open(&archive).unwrap()).unwrap();
     let mut release_manifest = String::new();
