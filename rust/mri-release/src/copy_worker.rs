@@ -1339,7 +1339,10 @@ mod windows {
             fs::create_dir(&original).unwrap();
 
             let error = copy_plan_inner(&plan_path, &expected_hash).unwrap_err();
-            assert!(error.contains("Source identity metadata changed"), "{error}");
+            assert!(
+                error.contains("Source identity metadata changed"),
+                "{error}"
+            );
             assert_eq!(fs::read_dir(&target).unwrap().count(), 0);
         }
 

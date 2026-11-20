@@ -9,8 +9,7 @@ const MAX_HELPER_BYTES: u64 = 16 * 1024 * 1024;
 
 fn helper_digest(path: &Path) -> io::Result<String> {
     let metadata = fs::symlink_metadata(path)?;
-    if !metadata.file_type().is_file() || metadata.len() == 0 || metadata.len() > MAX_HELPER_BYTES
-    {
+    if !metadata.file_type().is_file() || metadata.len() == 0 || metadata.len() > MAX_HELPER_BYTES {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "copy worker must be a nonempty bounded regular file",
@@ -59,7 +58,7 @@ fn main() {
         println!("cargo:rerun-if-changed={}", helper_path.display());
         match helper_digest(&helper_path) {
             Ok(digest) => println!("cargo:rustc-env=MRI_COPY_SHA256={digest}"),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {},
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => panic!("Cannot pin the Rust copy worker digest: {error}"),
         }
     }
