@@ -922,6 +922,18 @@ fn generated_copy_worker_is_declared_with_committed_rust_origins_and_hash_checke
     );
 }
 
+#[cfg(windows)]
+#[test]
+fn staging_copy_worker_installs_exact_embedded_bytes_without_replacing() {
+    let temp = tempfile::tempdir().unwrap();
+    let destination = temp.path().join("mri-copy.exe");
+
+    assert!(stage_copy_worker(&destination).unwrap());
+    assert_eq!(fs::read(&destination).unwrap(), TRUSTED_COPY_HELPER_BYTES);
+    assert!(!stage_copy_worker(&destination).unwrap());
+    assert_eq!(fs::read(&destination).unwrap(), TRUSTED_COPY_HELPER_BYTES);
+}
+
 #[test]
 fn never_overwrites_candidate_or_accepts_untrusted_revision() {
     let temp = tempfile::tempdir().unwrap();
