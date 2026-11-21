@@ -663,23 +663,6 @@ function Get-MRIFileHash {
         return [BitConverter]::ToString($sha.Hash).Replace('-','')
     } finally { if ($stream) { $stream.Dispose() }; $sha.Dispose() }
 }
-function Get-MRIWorkerExecutable {
-    $candidates=[Collections.Generic.List[string]]::new()
-    $packaged=Join-Path $PSScriptRoot 'mri-copy.exe'
-    $candidates.Add($packaged)
-    $repo=$null
-    if ([IO.File]::Exists((Join-Path $PSScriptRoot 'rust/mri-release/Cargo.toml'))) { $repo=$PSScriptRoot }
-    else {
-        $parent=Split-Path $PSScriptRoot -Parent
-        if ([IO.File]::Exists((Join-Path $parent 'rust/mri-release/Cargo.toml'))) { $repo=$parent }
-    }
-    if ($repo) {
-        $candidates.Add((Join-Path $repo 'rust/mri-release/target/debug/mri-copy.exe'))
-        $candidates.Add((Join-Path $repo 'rust/mri-release/target/release/mri-copy.exe'))
-    }
-    foreach ($candidate in $candidates) { if ([IO.File]::Exists($candidate)) { return $candidate } }
-    throw 'The Rust source-copy worker is unavailable. No source copy is allowed.'
-}
 function Get-MRIManifest {
     param([string]$Root, [switch]$IgnoreSystemDirectories, [switch]$NoHash, [scriptblock]$Guard)
     $base=[IO.Path]::GetFullPath($Root).TrimEnd([char[]]@('\','/')) + [IO.Path]::DirectorySeparatorChar

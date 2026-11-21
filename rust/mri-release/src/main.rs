@@ -94,6 +94,69 @@ fn embedded_trusted_runtime_helper() -> Result<Option<&'static [u8]>, String> {
     validate_trusted_runtime_helper(TRUSTED_COPY_HELPER_BYTES, Some(expected_sha256))?;
     Ok(Some(TRUSTED_COPY_HELPER_BYTES))
 }
+fn existing_copy_worker_state(destination: &Path, helper: &[u8]) -> Result<Option<()>, String> {
+    match fs::symlink_metadata(destination) {
+        Ok(metadata) => {
+            if !metadata.file_type().is_file() {
+                return Err("Refusing to replace a non-file copy-worker destination".into());
+            }
+            if metadata.len() != helper.len() as u64 {
+                return Err("Refusing to replace an existing copy worker".into());
+            }
+            let mut existing = Vec::with_capacity(helper.len());
+            File::open(destination)
+                .map_err(|error| error.to_string())?
+                .take(helper.len() as u64 + 1)
+                .read_to_end(&mut existing)
+                .map_err(|error| error.to_string())?;
+            if existing == helper {
+                Ok(Some(()))
+            } else {
+                Err("Refusing to replace an existing copy worker".into())
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }
+}
+fn stage_copy_worker(destination: &Path) -> Result<bool, String> {
+    let helper = embedded_trusted_runtime_helper()?
+        .ok_or("No embedded Rust copy worker is available to stage")?;
+    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    if !parent.is_dir() {
+        return Err("Copy-worker destination directory does not exist".into());
+    }
+    if existing_copy_worker_state(destination, helper)?.is_some() {
+        return Ok(false);
+    }
+
+    let mut file = match OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            return existing_copy_worker_state(destination, helper)?
+                .map(|()| false)
+                .ok_or_else(|| String::from("Copy-worker destination changed during staging"));
+        }
+        Err(error) => return Err(error.to_string()),
+    };
+    let write_result = file
+        .write_all(helper)
+        .and_then(|()| file.sync_all())
+        .map_err(|error| error.to_string());
+    drop(file);
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(destination);
+        return Err(format!("Could not write staged Rust copy worker: {error}"));
+    }
+    match existing_copy_worker_state(destination, helper)? {
+        Some(()) => Ok(true),
+        None => Err("Staged Rust copy worker disappeared before verification".into()),
+    }
+}
 fn is_git_environment_key(key: &OsStr) -> bool {
     key.to_string_lossy()
         .to_ascii_uppercase()
@@ -1473,10 +1536,15 @@ fn main() {
     let mut output: Option<PathBuf> = None;
     let mut verify_path: Option<PathBuf> = None;
     let mut source_only = false;
+    let mut stage_worker = false;
     let mut args = std::env::args().skip(1);
     while let Some(key) = args.next() {
         if key == "--source-only" {
             source_only = true;
+            continue;
+        }
+        if key == "--stage-copy-worker" {
+            stage_worker = true;
             continue;
         }
         let Some(value) = args.next() else {
@@ -1494,7 +1562,27 @@ fn main() {
         }
     }
     let repo = repo_root();
-    if let Some(path) = verify_path {
+    if stage_worker {
+        if source_only || verify_path.is_some() {
+            eprintln!("--stage-copy-worker cannot be combined with --source-only or --verify");
+            std::process::exit(2);
+        }
+        let destination = output.unwrap_or_else(|| repo.join("mri-copy.exe"));
+        match stage_copy_worker(&destination) {
+            Ok(true) => println!(
+                "Staged trusted Rust copy worker at {}",
+                destination.display()
+            ),
+            Ok(false) => println!(
+                "Trusted Rust copy worker already present at {}",
+                destination.display()
+            ),
+            Err(reason) => {
+                eprintln!("{reason}");
+                std::process::exit(1)
+            }
+        }
+    } else if let Some(path) = verify_path {
         if source_only {
             eprintln!("--source-only applies only to package builds");
             std::process::exit(2);

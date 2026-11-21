@@ -31,6 +31,7 @@ fn stages_the_embedded_copy_worker_to_the_requested_path() {
         fs::read(&destination).unwrap(),
         fs::read(env!("CARGO_BIN_EXE_mri-copy")).unwrap()
     );
+    assert!(run_stage(&destination).status.success());
 }
 
 #[cfg(windows)]
