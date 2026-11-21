@@ -8,6 +8,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 try {
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'The copy worker requires Windows.' }
+    Import-Module (Join-Path $PSScriptRoot 'MRI.Batch.psm1') -Force -DisableNameChecking
+    Initialize-MRINative
     $files=0
     $worker=Join-Path $PSScriptRoot 'mri-copy.exe'
     & $worker --copy $PlanPath $ExpectedHash
