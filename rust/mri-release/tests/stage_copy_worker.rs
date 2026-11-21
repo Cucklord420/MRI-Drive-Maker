@@ -3,6 +3,8 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 
+#[cfg(windows)]
+use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 
 fn run_stage(destination: &Path) -> Output {
@@ -27,10 +29,10 @@ fn stages_the_embedded_copy_worker_to_the_requested_path() {
         "stage command failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(
-        fs::read(&destination).unwrap(),
-        fs::read(env!("CARGO_BIN_EXE_mri-copy")).unwrap()
-    );
+    let staged = fs::read(&destination).unwrap();
+    let expected_sha256 = option_env!("MRI_COPY_SHA256")
+        .expect("the release verifier build must pin the copy-worker digest");
+    assert_eq!(format!("{:x}", Sha256::digest(&staged)), expected_sha256);
     assert!(run_stage(&destination).status.success());
 }
 
