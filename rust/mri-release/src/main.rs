@@ -13,6 +13,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use zip::{write::SimpleFileOptions, CompressionMethod, DateTime, ZipArchive, ZipWriter};
 
+const TRUSTED_COPY_HELPER_SHA256: Option<&str> = option_env!("MRI_COPY_SHA256");
+const TRUSTED_COPY_HELPER_BYTES: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/trusted_copy_helper.bin"));
+
 #[cfg(test)]
 thread_local! {
     static LAST_STAGED_PATH: std::cell::RefCell<Option<PathBuf>> =
@@ -37,6 +41,8 @@ struct Manifest {
     source_commit: String,
     launcher: String,
     source_files: IndexMap<String, String>,
+    #[serde(default)]
+    generated_files: IndexMap<String, Vec<String>>,
     sha256: IndexMap<String, String>,
 }
 fn repo_root() -> PathBuf {
@@ -44,6 +50,112 @@ fn repo_root() -> PathBuf {
 }
 fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
+}
+fn validate_runtime_helper(bytes: &[u8]) -> Result<(), String> {
+    if bytes.len() < 0x40 || &bytes[..2] != b"MZ" {
+        return Err("Rust runtime helper is not a Windows executable".into());
+    }
+    let pe_offset = u32::from_le_bytes(
+        bytes[0x3c..0x40]
+            .try_into()
+            .map_err(|_| "Malformed Windows executable header")?,
+    ) as usize;
+    let pe_end = pe_offset
+        .checked_add(26)
+        .filter(|end| *end <= bytes.len())
+        .ok_or("Malformed Windows executable header")?;
+    let pe_header = bytes
+        .get(pe_offset..pe_end)
+        .ok_or("Malformed Windows executable header")?;
+    if &pe_header[..4] != b"PE\0\0"
+        || u16::from_le_bytes([pe_header[4], pe_header[5]]) != 0x8664
+        || u16::from_le_bytes([pe_header[24], pe_header[25]]) != 0x020b
+    {
+        return Err("Rust runtime helper must be a 64-bit Windows executable".into());
+    }
+    Ok(())
+}
+fn validate_trusted_runtime_helper(
+    bytes: &[u8],
+    expected_sha256: Option<&str>,
+) -> Result<(), String> {
+    validate_runtime_helper(bytes)?;
+    let expected_sha256 = expected_sha256
+        .ok_or("Release verifier has no build-time SHA-256 for its Rust copy worker")?;
+    if !digest(bytes).eq_ignore_ascii_case(expected_sha256) {
+        return Err("Rust copy worker differs from the verifier's build-time SHA-256".into());
+    }
+    Ok(())
+}
+fn embedded_trusted_runtime_helper() -> Result<Option<&'static [u8]>, String> {
+    let Some(expected_sha256) = TRUSTED_COPY_HELPER_SHA256 else {
+        return Ok(None);
+    };
+    validate_trusted_runtime_helper(TRUSTED_COPY_HELPER_BYTES, Some(expected_sha256))?;
+    Ok(Some(TRUSTED_COPY_HELPER_BYTES))
+}
+fn existing_copy_worker_state(destination: &Path, helper: &[u8]) -> Result<Option<()>, String> {
+    match fs::symlink_metadata(destination) {
+        Ok(metadata) => {
+            if !metadata.file_type().is_file() {
+                return Err("Refusing to replace a non-file copy-worker destination".into());
+            }
+            if metadata.len() != helper.len() as u64 {
+                return Err("Refusing to replace an existing copy worker".into());
+            }
+            let mut existing = Vec::with_capacity(helper.len());
+            File::open(destination)
+                .map_err(|error| error.to_string())?
+                .take(helper.len() as u64 + 1)
+                .read_to_end(&mut existing)
+                .map_err(|error| error.to_string())?;
+            if existing == helper {
+                Ok(Some(()))
+            } else {
+                Err("Refusing to replace an existing copy worker".into())
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }
+}
+fn stage_copy_worker(destination: &Path) -> Result<bool, String> {
+    let helper = embedded_trusted_runtime_helper()?
+        .ok_or("No embedded Rust copy worker is available to stage")?;
+    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    if !parent.is_dir() {
+        return Err("Copy-worker destination directory does not exist".into());
+    }
+    if existing_copy_worker_state(destination, helper)?.is_some() {
+        return Ok(false);
+    }
+
+    let mut file = match OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            return existing_copy_worker_state(destination, helper)?
+                .map(|()| false)
+                .ok_or_else(|| String::from("Copy-worker destination changed during staging"));
+        }
+        Err(error) => return Err(error.to_string()),
+    };
+    let write_result = file
+        .write_all(helper)
+        .and_then(|()| file.sync_all())
+        .map_err(|error| error.to_string());
+    drop(file);
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(destination);
+        return Err(format!("Could not write staged Rust copy worker: {error}"));
+    }
+    match existing_copy_worker_state(destination, helper)? {
+        Some(()) => Ok(true),
+        None => Err("Staged Rust copy worker disappeared before verification".into()),
+    }
 }
 fn is_git_environment_key(key: &OsStr) -> bool {
     key.to_string_lossy()
@@ -296,7 +408,15 @@ fn canonical_member_name(name: &str) -> Result<(String, String), String> {
     Ok((captures[1].to_owned(), name.to_ascii_lowercase()))
 }
 fn verify(repo: &Path, archive_path: &Path) -> Result<Manifest, String> {
-    verify_with_environment(repo, archive_path, &process_environment())
+    let trusted_helper = embedded_trusted_runtime_helper()?;
+    verify_with_limits_and_helper(
+        repo,
+        archive_path,
+        &process_environment(),
+        DEFAULT_RESOURCE_LIMITS,
+        trusted_helper,
+        TRUSTED_COPY_HELPER_SHA256,
+    )
 }
 
 #[derive(Clone, Copy)]
@@ -794,19 +914,49 @@ fn stream_member<R: Read>(
     ))
 }
 
+#[cfg(test)]
 fn verify_with_environment(
     repo: &Path,
     archive_path: &Path,
     environment: &[(OsString, OsString)],
 ) -> Result<Manifest, String> {
-    verify_with_limits(repo, archive_path, environment, DEFAULT_RESOURCE_LIMITS)
+    verify_with_environment_and_helper(repo, archive_path, environment, None)
 }
 
+fn verify_with_environment_and_helper(
+    repo: &Path,
+    archive_path: &Path,
+    environment: &[(OsString, OsString)],
+    trusted_helper: Option<&[u8]>,
+) -> Result<Manifest, String> {
+    let expected_helper_sha256 = trusted_helper.map(digest);
+    verify_with_limits_and_helper(
+        repo,
+        archive_path,
+        environment,
+        DEFAULT_RESOURCE_LIMITS,
+        trusted_helper,
+        expected_helper_sha256.as_deref(),
+    )
+}
+
+#[cfg(test)]
 fn verify_with_limits(
     repo: &Path,
     archive_path: &Path,
     environment: &[(OsString, OsString)],
     limits: ResourceLimits,
+) -> Result<Manifest, String> {
+    verify_with_limits_and_helper(repo, archive_path, environment, limits, None, None)
+}
+
+fn verify_with_limits_and_helper(
+    repo: &Path,
+    archive_path: &Path,
+    environment: &[(OsString, OsString)],
+    limits: ResourceLimits,
+    trusted_helper: Option<&[u8]>,
+    expected_helper_sha256: Option<&str>,
 ) -> Result<Manifest, String> {
     assert_git_identity(repo, environment)?;
     let mut file = File::open(archive_path).map_err(|e| e.to_string())?;
@@ -938,9 +1088,13 @@ fn verify_with_limits(
     if names != expected {
         return Err("Unexpected package entries".into());
     }
-    if manifest.sha256.keys().collect::<BTreeSet<_>>()
-        != manifest.source_files.keys().collect::<BTreeSet<_>>()
-    {
+    let mut declared_files: BTreeSet<_> = manifest.source_files.keys().collect();
+    for name in manifest.generated_files.keys() {
+        if !declared_files.insert(name) {
+            return Err("A package file cannot be both committed and generated".into());
+        }
+    }
+    if manifest.sha256.keys().collect::<BTreeSet<_>>() != declared_files {
         return Err("Every packaged file must have a source origin".into());
     }
     for (name, source) in &manifest.source_files {
@@ -966,6 +1120,55 @@ fn verify_with_limits(
             u64::try_from(source_contents.len()).map_err(|_| "Committed source size overflow")?;
         if source_bytes != verified.expanded_bytes || digest(&source_contents) != verified.sha256 {
             return Err(format!("Source differs from declared Git commit: {name}"));
+        }
+    }
+    for (name, sources) in &manifest.generated_files {
+        if name != "App/mri-copy.exe"
+            || sources.len() != 2
+            || sources[0] != "rust/mri-release/src/bin/mri-copy.rs"
+            || sources[1] != "rust/mri-release/src/copy_worker.rs"
+        {
+            return Err(format!(
+                "Unexpected generated package file or origin: {name}"
+            ));
+        }
+        let verified = members
+            .get(&manifest_name(name, &prefix))
+            .ok_or("Missing generated package file")?;
+        if verified.sha256 != manifest.sha256[name] {
+            return Err(format!("Generated package file SHA-256 mismatch: {name}"));
+        }
+        let trusted_helper = trusted_helper.ok_or(
+            "Runtime package verification requires the verifier's embedded Rust copy worker",
+        )?;
+        validate_trusted_runtime_helper(trusted_helper, expected_helper_sha256)?;
+        let trusted_helper_length =
+            u64::try_from(trusted_helper.len()).map_err(|_| "Trusted helper size overflow")?;
+        if verified.expanded_bytes != trusted_helper_length
+            || verified.sha256 != digest(trusted_helper)
+        {
+            return Err(
+                "Packaged runtime helper differs from the verifier's embedded trusted copy worker"
+                    .into(),
+            );
+        }
+        for source in sources {
+            let source_size = committed_size_with_environment(
+                repo,
+                &manifest.source_commit,
+                source,
+                environment,
+            )?;
+            if source_size == 0 || source_size > limits.max_member_bytes {
+                return Err(format!(
+                    "Generated helper origin has invalid size: {source}"
+                ));
+            }
+            let contents =
+                committed_with_environment(repo, &manifest.source_commit, source, environment)?;
+            if contents.is_empty() {
+                return Err(format!("Generated package origin is empty: {source}"));
+            }
         }
     }
     let launchers: Vec<&str> = manifest
@@ -1165,6 +1368,17 @@ fn build_with_environment(
     sources: &[(String, String)],
     environment: &[(OsString, OsString)],
 ) -> Result<Manifest, String> {
+    build_with_environment_and_helper(repo, path, version, sources, environment, None)
+}
+
+fn build_with_environment_and_helper(
+    repo: &Path,
+    path: &Path,
+    version: &str,
+    sources: &[(String, String)],
+    environment: &[(OsString, OsString)],
+    runtime_helper: Option<&[u8]>,
+) -> Result<Manifest, String> {
     assert_git_identity(repo, environment)?;
     if !Regex::new(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,48}$")
         .unwrap()
@@ -1189,6 +1403,7 @@ fn build_with_environment(
     .to_owned();
     let mut entries = IndexMap::<String, Vec<u8>>::new();
     let mut origins = IndexMap::<String, String>::new();
+    let mut generated_files = IndexMap::<String, Vec<String>>::new();
     let mut insert = |source: &str, dest: &str| -> Result<(), String> {
         let content = committed_with_environment(repo, &revision, source, environment)?;
         entries.insert(dest.to_owned(), content);
@@ -1199,6 +1414,21 @@ fn build_with_environment(
         insert(source, destination)?;
     }
     drop(insert);
+    if let Some(helper) = runtime_helper {
+        validate_runtime_helper(helper)?;
+        let name = "App/mri-copy.exe".to_owned();
+        if entries.contains_key(&name) {
+            return Err("Runtime helper path collides with a committed package file".into());
+        }
+        entries.insert(name.clone(), helper.to_vec());
+        generated_files.insert(
+            name,
+            vec![
+                "rust/mri-release/src/bin/mri-copy.rs".to_owned(),
+                "rust/mri-release/src/copy_worker.rs".to_owned(),
+            ],
+        );
+    }
     let sha256: IndexMap<String, String> = entries
         .iter()
         .map(|(name, bytes)| (name.clone(), digest(bytes)))
@@ -1208,6 +1438,7 @@ fn build_with_environment(
         source_commit: revision,
         launcher: "START-MRI-DRIVE-MAKER.cmd".to_owned(),
         source_files: origins,
+        generated_files,
         sha256,
     };
     let mut manifest_bytes = serde_json::to_string_pretty(&manifest)
@@ -1259,7 +1490,8 @@ fn build_with_environment(
             if release_test_failure_requested(environment, "verify") {
                 return Err("injected verification failure".into());
             }
-            let checked = verify_with_environment(repo, staged_path, environment)?;
+            let checked =
+                verify_with_environment_and_helper(repo, staged_path, environment, runtime_helper)?;
             #[cfg(test)]
             let checked = if release_test_failure_requested(environment, "manifest-mismatch") {
                 let mut mismatched = checked;
@@ -1283,12 +1515,38 @@ fn build(repo: &Path, path: &Path, version: &str) -> Result<Manifest, String> {
     let sources = package_sources(repo)?;
     build_with_environment(repo, path, version, &sources, &process_environment())
 }
+fn build_runtime_package(repo: &Path, path: &Path, version: &str) -> Result<Manifest, String> {
+    if !cfg!(windows) {
+        return Err("Runtime packages must be built on Windows with the Rust copy worker".into());
+    }
+    let sources = package_sources(repo)?;
+    let helper = embedded_trusted_runtime_helper()?
+        .ok_or("Build Rust mri-copy.exe before the release verifier")?;
+    build_with_environment_and_helper(
+        repo,
+        path,
+        version,
+        &sources,
+        &process_environment(),
+        Some(helper),
+    )
+}
 fn main() {
     let mut version = "0.3.0".to_owned();
     let mut output: Option<PathBuf> = None;
     let mut verify_path: Option<PathBuf> = None;
+    let mut source_only = false;
+    let mut stage_worker = false;
     let mut args = std::env::args().skip(1);
     while let Some(key) = args.next() {
+        if key == "--source-only" {
+            source_only = true;
+            continue;
+        }
+        if key == "--stage-copy-worker" {
+            stage_worker = true;
+            continue;
+        }
         let Some(value) = args.next() else {
             eprintln!("Option is missing a value");
             std::process::exit(2);
@@ -1304,7 +1562,31 @@ fn main() {
         }
     }
     let repo = repo_root();
-    if let Some(path) = verify_path {
+    if stage_worker {
+        if source_only || verify_path.is_some() {
+            eprintln!("--stage-copy-worker cannot be combined with --source-only or --verify");
+            std::process::exit(2);
+        }
+        let destination = output.unwrap_or_else(|| repo.join("mri-copy.exe"));
+        match stage_copy_worker(&destination) {
+            Ok(true) => println!(
+                "Staged trusted Rust copy worker at {}",
+                destination.display()
+            ),
+            Ok(false) => println!(
+                "Trusted Rust copy worker already present at {}",
+                destination.display()
+            ),
+            Err(reason) => {
+                eprintln!("{reason}");
+                std::process::exit(1)
+            }
+        }
+    } else if let Some(path) = verify_path {
+        if source_only {
+            eprintln!("--source-only applies only to package builds");
+            std::process::exit(2);
+        }
         match verify(&repo, &path) {
             Ok(manifest) => println!(
                 "{}",
@@ -1320,9 +1602,18 @@ fn main() {
             }
         }
     } else {
+        if source_only && output.is_none() {
+            eprintln!("--source-only requires an explicit --output path");
+            std::process::exit(2);
+        }
         let path = output
             .unwrap_or_else(|| repo.join(format!("downloads/MRI-Drive-Maker-v{version}.zip")));
-        match build(&repo, &path, &version) {
+        let result = if source_only {
+            build(&repo, &path, &version)
+        } else {
+            build_runtime_package(&repo, &path, &version)
+        };
+        match result {
             Ok(manifest) => {
                 let bytes = fs::read(&path).expect("archive generated");
                 println!(
@@ -1332,6 +1623,7 @@ fn main() {
                         "sha256":digest(&bytes),
                         "bytes":bytes.len(),
                         "files":manifest.sha256.len()+1,
+                        "runtime_helper":!manifest.generated_files.is_empty(),
                         "source_commit":manifest.source_commit
                     })
                 );

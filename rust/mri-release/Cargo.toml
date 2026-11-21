@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 license = "GPL-3.0-only"
+default-run = "mri-release"
+
+[build-dependencies]
+sha2 = "0.10"
 
 [dependencies]
 indexmap = { version = "2", features = ["serde"] }

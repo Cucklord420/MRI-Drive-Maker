@@ -1,5 +1,6 @@
 Data/
 mri-config.json
+mri-copy.exe
 *.log
 *.zip
 

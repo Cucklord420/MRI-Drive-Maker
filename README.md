@@ -1,6 +1,6 @@
 # MRI Drive Maker
 
-**Packaged download:** See [GitHub Releases](https://github.com/Cucklord420/MRI-Drive-Maker/releases). For Kanguru drives reporting serial `0`, choose **v0.3.1 or newer**; for the streamlined menu and preserved build-concurrency setting, choose **v0.3.2 or newer**. Confirm that the versioned ZIP is attached before downloading. The [older v0.3.0 ZIP](https://github.com/Cucklord420/MRI-Drive-Maker/raw/refs/heads/main/downloads/MRI-Drive-Maker-v0.3.0.zip) remains unchanged and **does not have the serial-less USB fix**. If the updated release is not available, the [repository source](https://github.com/Cucklord420/MRI-Drive-Maker) can be downloaded from **Code → Download ZIP**. Extract the complete archive, then right-click **START-MRI-DRIVE-MAKER.cmd → Run as administrator**.
+**Packaged download:** See [GitHub Releases](https://github.com/Cucklord420/MRI-Drive-Maker/releases). For Kanguru drives reporting serial `0`, choose **v0.3.1 or newer**; for the streamlined menu and preserved build-concurrency setting, choose **v0.3.2 or newer**. Confirm that the versioned ZIP is attached before downloading. The [older v0.3.0 ZIP](https://github.com/Cucklord420/MRI-Drive-Maker/raw/refs/heads/main/downloads/MRI-Drive-Maker-v0.3.0.zip) remains unchanged and **does not have the serial-less USB fix**. If the updated release is not available, the [repository source](https://github.com/Cucklord420/MRI-Drive-Maker) can be downloaded from **Code → Download ZIP**. For a source ZIP, build `mri-copy` and `mri-release` from its extracted root, then run `cargo run --locked --manifest-path rust/mri-release/Cargo.toml -- --stage-copy-worker` before launching. The Rust helper is required and copying stops safely if it is absent. The verifier embeds the helper's SHA-256 at build time and refuses runtime packages if the helper is missing or replaced. Then right-click **START-MRI-DRIVE-MAKER.cmd → Run as administrator**.
 
 **Downloaded ZIP startup (Windows):** Windows may label files extracted from an Internet-downloaded ZIP as downloaded from the Internet. Because the launcher uses PowerShell `RemoteSigned`, unsigned extracted scripts may be blocked before the menu starts. If you have verified and trust the download from this repository's GitHub Releases, right-click the **downloaded ZIP** in File Explorer, choose **Properties → General → Unblock** (if available), apply the change, and **extract the ZIP again** before launching. Do not unblock files from an untrusted source. If an organization-managed policy still prevents execution, contact your IT administrator; do **not** disable script protections or switch to `Bypass`. [Microsoft: execution policies](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies?view=powershell-5.1) and [Unblock-File](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/unblock-file?view=powershell-5.1).
 
@@ -23,7 +23,7 @@ The selected batch cleans existing partitions, creates one active MBR/FAT32 part
 
 Drive identity is checked again before storage operations. System/boot disks, source/application disks, non-USB disks, offline/write-protected disks, and ambiguous identities are blocked. For the manually selected **menu 2** batch only, a USB without a usable serial (for example, two identical Kanguru FLASHBLU drives reporting `0`) can use an unambiguous Windows connection path plus PNP ID, model and size. This is **not permanent hardware identity**: do not unplug, swap, or move these drives during a build, and verify the displayed disk numbers before typing `ERASE`. A missing connection path or changed disk number blocks the build. The registered automatic watcher continues to require usable unique hardware serials.
 
-Empty sources, files larger than FAT32 permits, insufficient capacity, unsafe paths, and source links/junctions are rejected. ISO files are mounted read-only; ZIP files use a temporary extraction cache. A selected folder's contents are copied exactly, without silently flattening a child directory.
+Empty sources, files larger than FAT32 permits, insufficient capacity, unsafe paths, source links/junctions, and filesystems without a usable file identity are rejected. ISO files are mounted read-only; ZIP files use a temporary extraction cache. A selected folder's contents are copied exactly, without silently flattening a child directory.
 
 ## Automatic watcher and compatibility
 
@@ -33,9 +33,12 @@ Existing command-line actions and optional setup-batch recipes remain available.
 
 ## Rust source-release generator
 
-The candidate download is generated and verified by Rust directly from the pinned Git revision:
+The runnable candidate download is generated and verified by Rust on Windows directly from the pinned Git revision. Build the `mri-copy` executable first, then build `mri-release`; the verifier embeds the exact helper bytes and their SHA-256, then checks the packaged helper against those embedded bytes. Verification does not depend on a mutable neighboring executable. The packaged copy worker cannot verify release archives. Keep both executables from the same trusted checkout. `--source-only` exists for cross-platform packaging tests and omits the runtime helper; it does not produce a runnable download.
 
 ```text
+cargo build --locked --manifest-path rust/mri-release/Cargo.toml --bin mri-copy
+cargo build --locked --manifest-path rust/mri-release/Cargo.toml --bin mri-release
+cargo run --locked --manifest-path rust/mri-release/Cargo.toml -- --stage-copy-worker
 cargo test --locked --manifest-path rust/mri-release/Cargo.toml
 cargo run --locked --manifest-path rust/mri-release/Cargo.toml -- --output candidate.zip
 cargo run --locked --manifest-path rust/mri-release/Cargo.toml -- --verify candidate.zip
