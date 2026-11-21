@@ -23,7 +23,7 @@ fn run_copy_script(app: &Path) -> Output {
     let plan = app.join("copy-plan.json");
     fs::write(&plan, b"{}\n").unwrap();
     Command::new(
-        Path::new(std::env::var_os("SystemRoot").unwrap())
+        PathBuf::from(std::env::var_os("SystemRoot").unwrap())
             .join("System32/WindowsPowerShell/v1.0/powershell.exe"),
     )
     .args([
