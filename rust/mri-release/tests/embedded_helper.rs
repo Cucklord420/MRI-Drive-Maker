@@ -129,7 +129,27 @@ fn packaged_copy_worker_captures_source_identity_without_an_external_snapshot() 
         .read_to_string(&mut release_manifest)
         .unwrap();
     let manifest: serde_json::Value = serde_json::from_str(&release_manifest).unwrap();
-    assert!(manifest["generated_files"]["App/mri-copy.exe"].is_array());
+    assert_eq!(
+        manifest["generated_files"]["App/mri-copy.exe"],
+        serde_json::json!([
+            "rust/mri-release/src/bin/mri-copy.rs",
+            "rust/mri-release/src/copy_worker.rs"
+        ])
+    );
+    let packaged_helper_bytes = {
+        let mut helper = package
+            .by_name("MRI-Drive-Maker-v0.3.0/App/mri-copy.exe")
+            .expect("runtime package must contain its declared copy worker");
+        let mut bytes = Vec::new();
+        helper.read_to_end(&mut bytes).unwrap();
+        bytes
+    };
+    assert_eq!(
+        format!("{:x}", sha2::Sha256::digest(&packaged_helper_bytes)),
+        manifest["sha256"]["App/mri-copy.exe"]
+            .as_str()
+            .expect("copy-worker digest must be declared")
+    );
 
     package.extract(temp.path()).unwrap();
     let helper = temp.path().join("MRI-Drive-Maker-v0.3.0/App/mri-copy.exe");

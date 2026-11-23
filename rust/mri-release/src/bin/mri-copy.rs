@@ -9,8 +9,11 @@ use std::path::Path;
 
 fn main() {
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+    if args.len() == 1 && args[0].to_str() == Some("--preflight") {
+        return;
+    }
     if args.len() != 3 || args[0].to_str() != Some("--copy") {
-        eprintln!("Usage: mri-copy --copy PLAN_JSON EXPECTED_SHA256");
+        eprintln!("Usage: mri-copy --preflight | --copy PLAN_JSON EXPECTED_SHA256");
         std::process::exit(2);
     }
     let Some(expected_hash) = args[2].to_str() else {
