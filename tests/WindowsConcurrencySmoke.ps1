@@ -154,6 +154,7 @@ Export-ModuleMember -Function *-MRI*
     Copy-Item -LiteralPath (Join-Path $root 'MRI-Batch.ps1') -Destination $app
     Copy-Item -LiteralPath (Join-Path $root 'mri-config.example.json') -Destination $app
     Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $app
+    Copy-Item -LiteralPath (Join-Path $root 'mri-copy.exe') -Destination $app
     [IO.File]::AppendAllText($modulePath,@'
 
 function Read-Host {
