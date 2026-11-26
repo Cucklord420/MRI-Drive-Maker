@@ -45,6 +45,7 @@ try {
     $app=Join-Path $temp 'Fixture App'
     [void][IO.Directory]::CreateDirectory($app)
     Copy-Item -LiteralPath (Join-Path $root 'NativeProcess.cs') -Destination $app
+    Copy-Item -LiteralPath (Join-Path $root 'mri-copy.exe') -Destination (Join-Path $app 'mri-copy.exe')
     # Inject classification solely into a temporary copy, not production code.
     $moduleText=[IO.File]::ReadAllText((Join-Path $root 'MRI.Batch.psm1'))+@'
 
@@ -153,6 +154,7 @@ Export-ModuleMember -Function *-MRI*
     Copy-Item -LiteralPath (Join-Path $root 'MRI-Batch.ps1') -Destination $app
     Copy-Item -LiteralPath (Join-Path $root 'mri-config.example.json') -Destination $app
     Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $app
+    Copy-Item -LiteralPath (Join-Path $root 'mri-copy.exe') -Destination $app
     [IO.File]::AppendAllText($modulePath,@'
 
 function Read-Host {

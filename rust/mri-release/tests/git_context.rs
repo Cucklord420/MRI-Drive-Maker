@@ -110,9 +110,14 @@ fn rust_command_line_build_and_verify_ignore_inherited_git_context() {
     ];
     let environment = environment_with_overrides(&overrides);
     let archive = temp.path().join("protected-release.zip");
+    let source_only_arg = PathBuf::from("--source-only");
     let archive_arg = PathBuf::from("--output");
     let output_path = archive.as_path();
-    let args = [archive_arg.as_path(), output_path];
+    let args = [
+        source_only_arg.as_path(),
+        archive_arg.as_path(),
+        output_path,
+    ];
     let built = run_release(&args, &environment);
     assert!(
         built.status.success(),
@@ -139,6 +144,7 @@ fn rust_command_line_build_and_verify_ignore_inherited_git_context() {
         .unwrap();
     let manifest: serde_json::Value = serde_json::from_str(&release_manifest).unwrap();
     assert_eq!(manifest["source_commit"], intended_commit);
+    assert!(manifest["generated_files"].as_object().unwrap().is_empty());
 
     let verify_args = [Path::new("--verify"), archive.as_path()];
     let verified = run_release(&verify_args, &environment);

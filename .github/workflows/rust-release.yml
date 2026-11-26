@@ -61,13 +61,24 @@ jobs:
         run: |
           cargo clippy --locked --manifest-path rust/mri-release/Cargo.toml --all-targets -- -D warnings
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Run Rust release integrity tests in debug and release profiles
+      - name: Build the Rust copy helper in debug mode
         shell: pwsh
-        run: |
-          cargo test --locked --manifest-path rust/mri-release/Cargo.toml
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo test --release --locked --manifest-path rust/mri-release/Cargo.toml
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        run: cargo build --locked --manifest-path rust/mri-release/Cargo.toml --bin mri-copy
+      - name: Build the verifier with the Rust copy-helper digest
+        shell: pwsh
+        run: cargo build --locked --manifest-path rust/mri-release/Cargo.toml --bin mri-release
+      - name: Run Rust release integrity tests in debug mode
+        shell: pwsh
+        run: cargo test --locked --manifest-path rust/mri-release/Cargo.toml
+      - name: Build the Rust copy helper in release mode
+        shell: pwsh
+        run: cargo build --release --locked --manifest-path rust/mri-release/Cargo.toml --bin mri-copy
+      - name: Build the release verifier with the Rust copy-helper digest
+        shell: pwsh
+        run: cargo build --release --locked --manifest-path rust/mri-release/Cargo.toml --bin mri-release
+      - name: Run Rust release integrity tests in release mode
+        shell: pwsh
+        run: cargo test --release --locked --manifest-path rust/mri-release/Cargo.toml
       - name: Produce and verify native Rust release candidate
         shell: pwsh
         run: |
@@ -107,11 +118,20 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - name: Build, verify and exercise versioned release archive
+      - name: Confirm checkout matches the merged release commit
         shell: powershell
         run: |
           $actualHead = (git rev-parse HEAD).Trim()
           if ($LASTEXITCODE -ne 0 -or $actualHead -ne $env:GITHUB_SHA) { throw 'Checkout does not match the merged release commit.' }
+      - name: Build Rust copy helper for the release target
+        shell: powershell
+        run: cargo build --release --locked --manifest-path rust/mri-release/Cargo.toml --bin mri-copy
+      - name: Build release verifier with the helper digest
+        shell: powershell
+        run: cargo build --release --locked --manifest-path rust/mri-release/Cargo.toml --bin mri-release
+      - name: Build, verify and exercise versioned release archive
+        shell: powershell
+        run: |
           $archive = Join-Path $env:RUNNER_TEMP 'MRI-Drive-Maker-v0.3.2.zip'
           cargo run --release --locked --manifest-path rust/mri-release/Cargo.toml -- --version 0.3.2 --output $archive
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

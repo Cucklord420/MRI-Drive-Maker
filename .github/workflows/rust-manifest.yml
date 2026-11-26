@@ -33,6 +33,12 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+      - name: Build the Rust copy helper for source smoke tests
+        run: cargo build --locked --manifest-path rust/mri-release/Cargo.toml --bin mri-copy
+      - name: Build the release verifier with the Rust copy-helper digest
+        run: cargo build --locked --manifest-path rust/mri-release/Cargo.toml --bin mri-release
+      - name: Stage the pinned Rust copy helper for source smoke tests
+        run: cargo run --quiet --locked --manifest-path rust/mri-release/Cargo.toml -- --stage-copy-worker
       - name: Run Rust source-tree manifest self tests
         run: cargo test --locked --manifest-path rust/mri-manifest/Cargo.toml
       - name: Require canonical Rust formatting

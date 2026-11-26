@@ -824,6 +824,117 @@ fn package_contains_one_launcher_and_approved_source_files_only() {
 }
 
 #[test]
+fn generated_copy_worker_is_declared_with_committed_rust_origins_and_hash_checked() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    let environment = test_environment(&[]);
+    synthetic_repository(
+        &repo,
+        "synthetic source bytes\n",
+        "@echo synthetic\r\n",
+        &environment,
+    );
+    fs::create_dir_all(repo.join("rust/mri-release/src/bin")).unwrap();
+    fs::write(
+        repo.join("rust/mri-release/src/bin/mri-copy.rs"),
+        "fn main() {}\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.join("rust/mri-release/src/copy_worker.rs"),
+        "pub fn copy() {}\n",
+    )
+    .unwrap();
+    raw_git_success(
+        &repo,
+        &[
+            "add",
+            "rust/mri-release/src/bin/mri-copy.rs",
+            "rust/mri-release/src/copy_worker.rs",
+        ],
+        &environment,
+    );
+    raw_git_success(
+        &repo,
+        &["commit", "-m", "synthetic Rust helper"],
+        &environment,
+    );
+
+    let archive = temp.path().join("generated-helper.zip");
+    let mut helper = vec![0_u8; 128];
+    helper[..2].copy_from_slice(b"MZ");
+    helper[0x3c..0x40].copy_from_slice(&64_u32.to_le_bytes());
+    helper[64..68].copy_from_slice(b"PE\0\0");
+    helper[68..70].copy_from_slice(&0x8664_u16.to_le_bytes());
+    helper[88..90].copy_from_slice(&0x020b_u16.to_le_bytes());
+    let trusted_helper_sha256 = digest(&helper);
+    validate_trusted_runtime_helper(&helper, Some(&trusted_helper_sha256)).unwrap();
+    let mut changed_helper = helper.clone();
+    changed_helper[127] ^= 0x5a;
+    assert!(
+        validate_trusted_runtime_helper(&changed_helper, Some(&trusted_helper_sha256)).is_err()
+    );
+    assert!(validate_trusted_runtime_helper(&helper, None).is_err());
+    let manifest = build_with_environment_and_helper(
+        &repo,
+        &archive,
+        "0.3.0",
+        &synthetic_sources(),
+        &environment,
+        Some(&helper),
+    )
+    .unwrap();
+    assert_eq!(
+        manifest.generated_files["App/mri-copy.exe"],
+        [
+            "rust/mri-release/src/bin/mri-copy.rs".to_owned(),
+            "rust/mri-release/src/copy_worker.rs".to_owned()
+        ]
+    );
+    let verified =
+        verify_with_environment_and_helper(&repo, &archive, &environment, Some(&helper)).unwrap();
+    assert_eq!(verified, manifest);
+    let packaged = members(&archive);
+    let helper_member = "MRI-Drive-Maker-v0.3.0/App/mri-copy.exe";
+    assert_eq!(packaged[helper_member].0, helper);
+
+    corrupt_member_payload(&archive, "/App/mri-copy.exe");
+    assert!(verify_with_environment(&repo, &archive, &environment).is_err());
+
+    let replaced_archive = temp.path().join("replaced-helper.zip");
+    let mut replaced_helper = helper.clone();
+    replaced_helper[127] ^= 0x5a;
+    build_with_environment_and_helper(
+        &repo,
+        &replaced_archive,
+        "0.3.0",
+        &synthetic_sources(),
+        &environment,
+        Some(&replaced_helper),
+    )
+    .unwrap();
+    let error =
+        verify_with_environment_and_helper(&repo, &replaced_archive, &environment, Some(&helper))
+            .unwrap_err();
+    assert!(
+        error.contains("embedded trusted copy worker"),
+        "unexpected verification failure: {error}"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn staging_copy_worker_installs_exact_embedded_bytes_without_replacing() {
+    let temp = tempfile::tempdir().unwrap();
+    let destination = temp.path().join("mri-copy.exe");
+
+    assert!(stage_copy_worker(&destination).unwrap());
+    assert_eq!(fs::read(&destination).unwrap(), TRUSTED_COPY_HELPER_BYTES);
+    assert!(!stage_copy_worker(&destination).unwrap());
+    assert_eq!(fs::read(&destination).unwrap(), TRUSTED_COPY_HELPER_BYTES);
+}
+
+#[test]
 fn never_overwrites_candidate_or_accepts_untrusted_revision() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("do-not-overwrite.zip");

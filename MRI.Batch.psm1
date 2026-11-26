@@ -805,6 +805,7 @@ function Invoke-MRISetupCommand {
 }
 function Invoke-MRICopy {
     param($Config,$Target,$Manifest,[string]$WorkPath,[scriptblock]$Guard,[string]$CancelPath)
+    Initialize-MRINative
     $planPath=Join-Path $WorkPath 'copy-plan.json'
     $planHash=Write-MRIJson $planPath ([pscustomobject]@{SourceRoot=$Config.SourcePath;TargetRoot=$Target.Path;Manifest=$Manifest}) -PassThruHash
     $arguments=@('-NoLogo','-NoProfile','-ExecutionPolicy','RemoteSigned','-File',(Join-Path $PSScriptRoot 'Copy-MRIFiles.ps1'),'-PlanPath',$planPath,'-ExpectedHash',$planHash)
@@ -986,6 +987,13 @@ function Invoke-MRIBuild {
             }
             Set-MRIState $StatePath $Record 'ALREADY_READY' 'Already verified for this source and recipe.'
             return [pscustomobject]@{ Success=$true; Label=$Record.Label; AlreadyReady=$true }
+        }
+        $copyWorker=Join-Path $PSScriptRoot 'mri-copy.exe'
+        try {
+            & $copyWorker --preflight
+            if ($LASTEXITCODE -ne 0) { throw 'The Rust copy worker preflight failed.' }
+        } catch {
+            throw 'Required Rust copy worker is missing or cannot run. No disk preparation was started.'
         }
         if ($Config.PrepareDisk) {
             Assert-MRINotCancelled $CancelPath
